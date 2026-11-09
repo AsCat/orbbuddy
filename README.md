@@ -1,0 +1,79 @@
+# 圆伴 OrbBuddy
+
+让 Android 手机在移动网络下主动连回自己的服务器，通过 MCP 向电脑上的智能体提供按需读屏和界面操作。MVP 以开发测试为目标，无需运行时无线 ADB，也无需手机和电脑处在同一局域网。
+
+## 模块
+
+- `android/`：Android 11+ 客户端。用户手动启用无障碍服务，填写 `wss://` 地址和设备令牌，开启或停止测试会话。
+- `server/`：单个 Go 进程，接收手机 WebSocket 长连接，并提供 Streamable HTTP MCP 接口；不持久化屏幕内容。
+- `deploy/`：systemd 与 Nginx 示例配置。线上入口为 `orb.yuanxuyinli.com`，Go 只监听本机端口。
+
+## 运行原理
+
+```text
+Android 无障碍服务 ── WSS/移动网络 ──> 私有服务器 Go relay
+                                                │
+电脑 Codex / WorkBuddy ── HTTPS MCP ────────────┘
+```
+
+手机断线后自动退避重连。每次 `get_screen` 读取当前无障碍节点树并尝试截取一张压缩 JPEG；`tap_element` 使用该次读屏返回的 `revision` 与节点 `path`，界面变化后必须重新读屏。截图被 Android 拒绝或安全窗口遮挡时，仍可返回可见的节点树和 `imageError`。
+
+## 本地开发
+
+```bash
+cd server
+go test ./...
+ORBBUDDY_DEVICE_TOKEN=dev-device ORBBUDDY_MCP_TOKEN=dev-mcp go run ./cmd/orbbuddy-server
+```
+
+另一个终端启动模拟设备：
+
+```bash
+cd server
+ORBBUDDY_DEVICE_URL='ws://127.0.0.1:8080/device?id=primary' \
+ORBBUDDY_DEVICE_TOKEN=dev-device go run ./cmd/mock-device
+```
+
+Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运行 `./gradlew :app:assembleDebug`。调试包允许明文 `ws://` 连接本机服务；正式包只接受 `wss://`。手机无需 USB 或无线 ADB 才能正常连接服务器。首次使用需手动安装 App、启用无障碍服务并保存连接配置。系统可能在省电模式下暂停后台连接，需按机型设置后台运行许可。
+
+## MCP 工具
+
+| 工具 | 主要参数 | 结果 |
+| --- | --- | --- |
+| `device_status` | 无 | 在线设备及连接时间 |
+| `get_screen` | `deviceId?` | 节点树、尺寸、修订号、JPEG |
+| `tap_element` | `revision`, `path`, `deviceId?` | 点击结果 |
+| `tap` | `x`, `y`, `deviceId?` | 点击结果 |
+| `swipe` | `x1`, `y1`, `x2`, `y2`, `durationMs`, `deviceId?` | 滑动结果 |
+| `input_text` | `text`, `deviceId?` | 替换当前聚焦输入框内容 |
+| `press_key` | `key=back/home`, `deviceId?` | 系统返回或主页 |
+| `get_app_info` | `packageName`, `deviceId?` | 包名、版本、应用名称 |
+
+`deviceId` 默认 `primary`。坐标使用手机原始像素尺寸，即使 JPEG 缩小也不改变坐标系。协议见 [docs/protocol.md](docs/protocol.md)。
+
+## 部署
+
+Go 服务配置 `ORBBUDDY_LISTEN=127.0.0.1:18093`、`ORBBUDDY_DEVICE_TOKEN` 和 `ORBBUDDY_MCP_TOKEN`；两个令牌分别给手机和 MCP 客户端，保存在服务器 `/etc/orbbuddy/server.env`，不要提交到 Git。Nginx 负责 HTTPS/WSS。示例见 `deploy/`，上线时执行 `nginx -t` 后再 reload。
+
+手机地址：`wss://orb.yuanxuyinli.com/device?id=primary`
+
+MCP 地址：`https://orb.yuanxuyinli.com/mcp`
+
+客户端配置见 [docs/client-setup.md](docs/client-setup.md)，后续阶段见 [docs/roadmap.md](docs/roadmap.md)。
+
+## 当前边界与下一步
+
+这是面向个人开发测试的首版。无障碍服务能读取的节点由目标 App 决定；`FLAG_SECURE` 等受保护窗口不能保证截图。Android 11+ 的包可见性限制会影响应用信息查询；当前安装包申请 `QUERY_ALL_PACKAGES`，适合开发者侧载，若发布到 Google Play 需按政策重新设计该功能。
+
+目前**没有支付与下单确认流程**，不要让智能体执行付款或最终提交订单。未来增加悬浮球时，以手机端本地确认为准：智能体仅可准备草稿，最终下单/支付由用户在手机上确认；确认有短时效且只适用于当前订单摘要；取消或超时立即拒绝；完成后提供可行的撤销/售后入口。敏感输入只由用户在手机本地填写，不返回到 MCP。
+
+## 参考资料
+
+- [Android AccessibilityService：手势、截图与无障碍节点](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService)
+- [Android package visibility](https://developer.android.com/training/package-visibility)
+- [Model Context Protocol Go SDK](https://github.com/modelcontextprotocol/go-sdk)
+- [MCP Streamable HTTP 规范](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+
+## 许可
+
+Apache-2.0，见 [LICENSE](LICENSE)。

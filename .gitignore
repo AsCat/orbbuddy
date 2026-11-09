@@ -1,0 +1,9 @@
+.DS_Store
+.idea/
+.gradle/
+.kotlin/
+**/build/
+**/local.properties
+*.iml
+server/orbbuddy-server
+.env
