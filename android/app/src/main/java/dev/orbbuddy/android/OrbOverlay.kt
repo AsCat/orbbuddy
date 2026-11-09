@@ -50,6 +50,7 @@ class OrbOverlay(
     private var downY = 0f
     private var startX = 0
     private var startY = 0
+    private var downAt = 0L
     private var dragging = false
 
     private val screenReceiver = object : BroadcastReceiver() {
@@ -139,6 +140,7 @@ class OrbOverlay(
                 downY = event.rawY
                 startX = params.x
                 startY = params.y
+                downAt = event.eventTime
                 dragging = false
                 return true
             }
@@ -154,12 +156,18 @@ class OrbOverlay(
                 return true
             }
             MotionEvent.ACTION_UP -> {
-                if (dragging) {
+                val endedAway = abs(event.rawX - downX) > touchSlop || abs(event.rawY - downY) > touchSlop
+                if (dragging && endedAway && event.eventTime - downAt >= 100L) {
                     val screen = displaySize()
                     params.x = if (params.x + size / 2 < screen.x / 2) edge else screen.x - size - edge
                     orb?.let { manager.updateViewLayout(it, params) }
                     prefs.edit().putInt("orb_x", params.x).putInt("orb_y", params.y).apply()
-                } else toggleMenu()
+                } else {
+                    params.x = startX
+                    params.y = startY
+                    orb?.let { manager.updateViewLayout(it, params) }
+                    toggleMenu()
+                }
                 return true
             }
             MotionEvent.ACTION_CANCEL -> return true
