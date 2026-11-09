@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -64,6 +65,7 @@ func (h *Hub) Attach(id string, conn *websocket.Conn) {
 	old := h.devices[id]
 	h.devices[id] = d
 	h.mu.Unlock()
+	log.Printf("device %s connected", id)
 	if old != nil {
 		old.close(errors.New("device reconnected"))
 	}
@@ -74,6 +76,7 @@ func (h *Hub) Attach(id string, conn *websocket.Conn) {
 			delete(h.devices, id)
 		}
 		h.mu.Unlock()
+		log.Printf("device %s disconnected", id)
 	}()
 	conn.SetReadLimit(5 << 20)
 	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
@@ -87,6 +90,7 @@ func (h *Hub) Attach(id string, conn *websocket.Conn) {
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
+			log.Printf("device %s socket closed: %v", id, err)
 			return
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))

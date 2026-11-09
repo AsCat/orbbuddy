@@ -34,7 +34,7 @@ ORBBUDDY_DEVICE_URL='ws://127.0.0.1:8080/device?id=primary' \
 ORBBUDDY_DEVICE_TOKEN=dev-device go run ./cmd/mock-device
 ```
 
-Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运行 `./gradlew :app:assembleDebug`。调试包允许明文 `ws://` 连接本机服务；正式包只接受 `wss://`。手机无需 USB 或无线 ADB 才能正常连接服务器。首次使用需手动安装 App、启用无障碍服务并保存连接配置。系统可能在省电模式下暂停后台连接，需按机型设置后台运行许可。
+Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运行 `./gradlew :app:assembleDebug`。调试包允许明文 `ws://` 连接本机服务；正式包只接受 `wss://`。手机无需 USB 或无线 ADB 才能正常连接服务器。首次使用需手动安装 App、启用无障碍服务并保存连接配置。会话开启时显示前台通知，网络切换时主动重连；部分机型仍可能要求设置后台运行许可。
 
 ## MCP 工具
 
@@ -66,6 +66,8 @@ MCP 地址：`https://orb.yuanxuyinli.com/mcp`
 这是面向个人开发测试的首版。无障碍服务能读取的节点由目标 App 决定；`FLAG_SECURE` 等受保护窗口不能保证截图。Android 11+ 的包可见性限制会影响应用信息查询；当前安装包申请 `QUERY_ALL_PACKAGES`，适合开发者侧载，若发布到 Google Play 需按政策重新设计该功能。
 
 目前**没有支付与下单确认流程**，不要让智能体执行付款或最终提交订单。未来增加悬浮球时，以手机端本地确认为准：智能体仅可准备草稿，最终下单/支付由用户在手机上确认；确认有短时效且只适用于当前订单摘要；取消或超时立即拒绝；完成后提供可行的撤销/售后入口。敏感输入只由用户在手机本地填写，不返回到 MCP。
+
+若 `device_status` 返回空列表，先在手机打开圆伴，确认测试会话已开启、无障碍服务已启用且会话通知仍在。部分厂商会限制后台运行，可能需要在系统设置中允许圆伴持续运行。服务器可用 `journalctl -u orbbuddy.service` 查看设备上下线时间；MCP 服务在线不代表手机一定在线。
 
 ## 参考资料
 

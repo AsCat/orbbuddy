@@ -1,7 +1,10 @@
 package dev.orbbuddy.android
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.ViewGroup
@@ -59,6 +62,11 @@ class MainActivity : Activity() {
                 }
                 prefs.edit().putString("url", address).putString("token", token.text.toString())
                     .putBoolean("enabled", true).apply()
+                startSessionKeeper()
+                if (Build.VERSION.SDK_INT >= 33 &&
+                    checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+                }
                 sendBroadcast(Intent(OrbAccessibilityService.ACTION_RELOAD).setPackage(packageName))
                 refreshStatus()
             }
@@ -71,6 +79,7 @@ class MainActivity : Activity() {
             text = "停止测试会话"
             setOnClickListener {
                 prefs.edit().putBoolean("enabled", false).apply()
+                stopService(Intent(this@MainActivity, SessionService::class.java))
                 sendBroadcast(Intent(OrbAccessibilityService.ACTION_RELOAD).setPackage(packageName))
                 refreshStatus()
             }
@@ -80,7 +89,12 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (getSharedPreferences("connection", MODE_PRIVATE).getBoolean("enabled", false)) startSessionKeeper()
         refreshStatus()
+    }
+
+    private fun startSessionKeeper() {
+        startForegroundService(Intent(this, SessionService::class.java))
     }
 
     private fun refreshStatus() {

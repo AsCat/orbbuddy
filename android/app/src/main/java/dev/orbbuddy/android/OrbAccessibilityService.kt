@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -42,8 +44,22 @@ class OrbAccessibilityService : AccessibilityService() {
     private val client = OkHttpClient.Builder().pingInterval(25, TimeUnit.SECONDS).build()
     private var socket: WebSocket? = null
     private var receiverRegistered = false
+    private var networkCallbackRegistered = false
+    private var sawDefaultNetwork = false
     private var reconnectDelayMs = 1000L
     private var revision = 1L
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            // The first callback describes the network already used by reconnect().
+            if (sawDefaultNetwork || socket == null) reconnect()
+            sawDefaultNetwork = true
+        }
+
+        override fun onLost(network: Network) {
+            reconnect()
+        }
+    }
 
     private val reloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -63,6 +79,11 @@ class OrbAccessibilityService : AccessibilityService() {
             receiverRegistered = true
         }
         reconnect()
+        if (!networkCallbackRegistered) {
+            (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager)
+                .registerDefaultNetworkCallback(networkCallback, handler)
+            networkCallbackRegistered = true
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -73,6 +94,10 @@ class OrbAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         if (receiverRegistered) unregisterReceiver(reloadReceiver)
+        if (networkCallbackRegistered) {
+            (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager)
+                .unregisterNetworkCallback(networkCallback)
+        }
         socket?.close(1000, "service stopped")
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
