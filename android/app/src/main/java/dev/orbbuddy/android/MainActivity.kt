@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.ViewGroup
 import android.widget.Button
@@ -76,6 +77,10 @@ class MainActivity : Activity() {
             setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         })
         add(Button(this).apply {
+            text = "后台连接与省电设置"
+            setOnClickListener { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+        })
+        add(Button(this).apply {
             text = "停止测试会话"
             setOnClickListener {
                 prefs.edit().putBoolean("enabled", false).apply()
@@ -100,7 +105,10 @@ class MainActivity : Activity() {
     private fun refreshStatus() {
         val prefs = getSharedPreferences("connection", MODE_PRIVATE)
         status.text = if (prefs.getBoolean("enabled", false)) {
-            "测试会话已开启。连接状态：${prefs.getString("status", "等待无障碍服务")}"
+            val unrestricted = (getSystemService(POWER_SERVICE) as PowerManager)
+                .isIgnoringBatteryOptimizations(packageName)
+            "测试会话已开启。连接状态：${prefs.getString("status", "等待无障碍服务")}。" +
+                if (unrestricted) "后台省电限制已关闭" else "若锁屏后断线，请在后台连接设置中允许持续运行"
         } else "测试会话已停止"
     }
 }

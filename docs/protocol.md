@@ -1,6 +1,6 @@
 # Relay protocol v0.1
 
-Android 持有设备令牌，连接 `GET /device?id=primary`，请求头 `Authorization: Bearer <device-token>`。服务端在同一设备 ID 重连时关闭旧连接；所有命令串行执行，单次 MCP 调用超时 20 秒。设备 WebSocket 每 25 秒发送 ping，服务端保持 90 秒读超时。
+Android 持有设备令牌，连接 `GET /device?id=primary`，请求头 `Authorization: Bearer <device-token>`。服务端在同一设备 ID 重连时关闭旧连接；所有业务命令串行执行，单次 MCP 调用超时 20 秒，超时会关闭无响应的设备连接。设备 WebSocket 每 25 秒发送 ping；服务端每 25 秒发送应用级 `heartbeat` 命令并等待响应，保持 70 秒读超时。Android 端在约 75 秒未收到服务端消息时主动重连。
 
 服务端发送：
 
@@ -25,5 +25,8 @@ Android 持有设备令牌，连接 `GET /device?id=primary`，请求头 `Author
 - `input_text`: `{"text":"hello"}`，替换当前聚焦输入框内容，最多 1000 字符。
 - `press_key`: `{"key":"back"}` 或 `home`。
 - `get_app_info`: `{"packageName":"com.example.app"}`。
+- `heartbeat`: `{}`。仅服务端保活使用，客户端返回 `{"alive":true}`，不作为 MCP 工具公开。
 
 MCP 客户端另持 MCP 令牌，连接 `POST /mcp`（Streamable HTTP，JSON 响应）。令牌不出现在 URL 中。服务器不缓存截图、节点树或输入文本。
+
+`device_status` 的 `lastSeenAt` 表示服务端最后一次收到设备消息的时间。设备长时间无响应或单次工具调用超时，服务端会断开连接，避免将失联设备继续报告为在线。

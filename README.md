@@ -40,7 +40,7 @@ Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运
 
 | 工具 | 主要参数 | 结果 |
 | --- | --- | --- |
-| `device_status` | 无 | 在线设备及连接时间 |
+| `device_status` | 无 | 在线设备、连接时间及最后心跳时间 |
 | `get_screen` | `deviceId?` | 节点树、尺寸、修订号、JPEG |
 | `tap_element` | `revision`, `path`, `deviceId?` | 点击结果 |
 | `tap` | `x`, `y`, `deviceId?` | 点击结果 |
@@ -67,7 +67,7 @@ MCP 地址：`https://orb.yuanxuyinli.com/mcp`
 
 目前**没有支付与下单确认流程**，不要让智能体执行付款或最终提交订单。未来增加悬浮球时，以手机端本地确认为准：智能体仅可准备草稿，最终下单/支付由用户在手机上确认；确认有短时效且只适用于当前订单摘要；取消或超时立即拒绝；完成后提供可行的撤销/售后入口。敏感输入只由用户在手机本地填写，不返回到 MCP。
 
-若 `device_status` 返回空列表，先在手机打开圆伴，确认测试会话已开启、无障碍服务已启用且会话通知仍在。部分厂商会限制后台运行，可能需要在系统设置中允许圆伴持续运行。服务器可用 `journalctl -u orbbuddy.service` 查看设备上下线时间；MCP 服务在线不代表手机一定在线。
+若 `device_status` 返回空列表，先在手机打开圆伴，确认测试会话已开启、无障碍服务已启用且会话通知仍在。部分厂商会限制后台运行，可使用 App 内“后台连接与省电设置”入口允许圆伴持续运行。服务器可用 `journalctl -u orbbuddy.service` 查看设备上下线时间；MCP 服务在线不代表手机一定在线。Android 的 Doze 可能暂停网络；即使使用前台服务也不能保证所有设备在长时间锁屏后立即可达，详见 [Android 官方说明](https://developer.android.com/training/monitoring-device-state/doze-standby)。
 
 ## 参考资料
 

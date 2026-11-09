@@ -19,6 +19,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
 import android.view.Display
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
@@ -48,6 +50,19 @@ class OrbAccessibilityService : AccessibilityService() {
     private var sawDefaultNetwork = false
     private var reconnectDelayMs = 1000L
     private var revision = 1L
+    private var lastServerMessageAt = 0L
+    private var watchdogStarted = false
+
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (prefs().getBoolean("enabled", false) && socket != null &&
+                SystemClock.elapsedRealtime() - lastServerMessageAt > 75_000L) {
+                Log.w("OrbBuddy", "server heartbeat missing; reconnecting")
+                reconnect()
+            }
+            handler.postDelayed(this, 30_000L)
+        }
+    }
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -84,6 +99,10 @@ class OrbAccessibilityService : AccessibilityService() {
                 .registerDefaultNetworkCallback(networkCallback, handler)
             networkCallbackRegistered = true
         }
+        if (!watchdogStarted) {
+            handler.postDelayed(watchdog, 30_000L)
+            watchdogStarted = true
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -94,6 +113,7 @@ class OrbAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         if (receiverRegistered) unregisterReceiver(reloadReceiver)
+        handler.removeCallbacks(watchdog)
         if (networkCallbackRegistered) {
             (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager)
                 .unregisterNetworkCallback(networkCallback)
@@ -125,26 +145,36 @@ class OrbAccessibilityService : AccessibilityService() {
             return
         }
         setStatus("连接中")
+        lastServerMessageAt = SystemClock.elapsedRealtime()
         val request = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 handler.post {
                     if (socket === webSocket) {
                         reconnectDelayMs = 1000L
+                        lastServerMessageAt = SystemClock.elapsedRealtime()
+                        Log.i("OrbBuddy", "device socket connected")
                         setStatus("已连接")
                     }
                 }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                handler.post { if (socket === webSocket) handleCommand(webSocket, text) }
+                handler.post {
+                    if (socket === webSocket) {
+                        lastServerMessageAt = SystemClock.elapsedRealtime()
+                        handleCommand(webSocket, text)
+                    }
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.w("OrbBuddy", "device socket failed: ${t.message}")
                 handler.post { scheduleReconnect(webSocket) }
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Log.i("OrbBuddy", "device socket closed: $code")
                 handler.post { scheduleReconnect(webSocket) }
             }
         })
@@ -165,6 +195,7 @@ class OrbAccessibilityService : AccessibilityService() {
             id = command.getString("id")
             val params = command.optJSONObject("params") ?: JSONObject()
             when (command.getString("method")) {
+                "heartbeat" -> replyOK(webSocket, id, JSONObject().put("alive", true))
                 "get_screen" -> getScreen(webSocket, id)
                 "tap_element" -> tapElement(webSocket, id, params)
                 "tap" -> gesture(webSocket, id, params.getInt("x"), params.getInt("y"), null, null, 60L)

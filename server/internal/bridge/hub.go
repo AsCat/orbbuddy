@@ -32,6 +32,7 @@ type Response struct {
 type DeviceStatus struct {
 	ID          string    `json:"id"`
 	ConnectedAt time.Time `json:"connectedAt"`
+	LastSeenAt  time.Time `json:"lastSeenAt"`
 }
 
 type pendingResult struct {
@@ -42,6 +43,7 @@ type pendingResult struct {
 type device struct {
 	id          string
 	connectedAt time.Time
+	lastSeenAt  time.Time
 	conn        *websocket.Conn
 	writeMu     sync.Mutex
 	opMu        sync.Mutex
@@ -60,7 +62,8 @@ func NewHub() *Hub { return &Hub{devices: make(map[string]*device)} }
 // Attach replaces an older connection for the same device. It blocks until the
 // socket closes, so the HTTP upgrade handler owns the connection lifecycle.
 func (h *Hub) Attach(id string, conn *websocket.Conn) {
-	d := &device{id: id, connectedAt: time.Now().UTC(), conn: conn, pending: make(map[string]chan pendingResult)}
+	now := time.Now().UTC()
+	d := &device{id: id, connectedAt: now, lastSeenAt: now, conn: conn, pending: make(map[string]chan pendingResult)}
 	h.mu.Lock()
 	old := h.devices[id]
 	h.devices[id] = d
@@ -79,26 +82,48 @@ func (h *Hub) Attach(id string, conn *websocket.Conn) {
 		log.Printf("device %s disconnected", id)
 	}()
 	conn.SetReadLimit(5 << 20)
-	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 	conn.SetPingHandler(func(message string) error {
-		if err := conn.SetReadDeadline(time.Now().Add(90 * time.Second)); err != nil {
+		if err := conn.SetReadDeadline(time.Now().Add(70 * time.Second)); err != nil {
 			return err
 		}
 		return conn.WriteControl(websocket.PongMessage, []byte(message), time.Now().Add(10*time.Second))
 	})
-	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(90 * time.Second)) })
+	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(70 * time.Second)) })
+	stopHeartbeat := make(chan struct{})
+	defer close(stopHeartbeat)
+	go func() {
+		ticker := time.NewTicker(25 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				d.writeMu.Lock()
+				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				err := conn.WriteJSON(Command{ID: "__heartbeat__", Method: "heartbeat", Params: map[string]any{}})
+				d.writeMu.Unlock()
+				if err != nil {
+					_ = conn.Close()
+					return
+				}
+			case <-stopHeartbeat:
+				return
+			}
+		}
+	}()
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			log.Printf("device %s socket closed: %v", id, err)
 			return
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 		var response Response
 		if json.Unmarshal(data, &response) != nil || response.ID == "" {
 			continue
 		}
 		d.mu.Lock()
+		d.lastSeenAt = time.Now().UTC()
 		ch := d.pending[response.ID]
 		delete(d.pending, response.ID)
 		d.mu.Unlock()
@@ -129,7 +154,10 @@ func (h *Hub) Status() []DeviceStatus {
 	defer h.mu.RUnlock()
 	out := make([]DeviceStatus, 0, len(h.devices))
 	for _, d := range h.devices {
-		out = append(out, DeviceStatus{ID: d.id, ConnectedAt: d.connectedAt})
+		d.mu.Lock()
+		lastSeenAt := d.lastSeenAt
+		d.mu.Unlock()
+		out = append(out, DeviceStatus{ID: d.id, ConnectedAt: d.connectedAt, LastSeenAt: lastSeenAt})
 	}
 	return out
 }
@@ -163,6 +191,7 @@ func (h *Hub) Call(ctx context.Context, deviceID, method string, params any) (js
 		d.mu.Unlock()
 	}()
 	d.writeMu.Lock()
+	_ = d.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	err := d.conn.WriteJSON(Command{ID: id, Method: method, Params: params})
 	d.writeMu.Unlock()
 	if err != nil {
@@ -178,6 +207,8 @@ func (h *Hub) Call(ctx context.Context, deviceID, method string, params any) (js
 		}
 		return result.response.Result, nil
 	case <-ctx.Done():
+		// A non-responsive socket must not remain listed as an online device.
+		d.close(ctx.Err())
 		return nil, ctx.Err()
 	}
 }
