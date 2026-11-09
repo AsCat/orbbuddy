@@ -34,7 +34,7 @@ ORBBUDDY_DEVICE_URL='ws://127.0.0.1:8080/device?id=primary' \
 ORBBUDDY_DEVICE_TOKEN=dev-device go run ./cmd/mock-device
 ```
 
-Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运行 `./gradlew :app:assembleDebug`。调试包允许明文 `ws://` 连接本机服务；正式包只接受 `wss://`。手机无需 USB 或无线 ADB 才能正常连接服务器。首次使用需手动安装 App、启用无障碍服务并保存连接配置。会话开启时显示前台通知，网络切换时主动重连；部分机型仍可能要求设置后台运行许可。
+Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运行 `./gradlew :app:assembleDebug`。调试包允许明文 `ws://` 连接本机服务；正式包只接受 `wss://`。手机无需 USB 或无线 ADB 才能正常连接服务器。首次使用需手动安装 App、启用无障碍服务并保存连接配置。会话开启时显示前台通知、持有部分唤醒锁，网络切换时主动重连；**持续会话会增加耗电**，用 App 内“停止测试会话”可释放唤醒锁。部分机型仍可能要求设置后台运行许可。
 
 ## MCP 工具
 
