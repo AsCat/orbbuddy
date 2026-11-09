@@ -69,6 +69,8 @@ MCP 地址：`https://orb.yuanxuyinli.com/mcp`
 
 若 `device_status` 返回空列表，先在手机打开圆伴，确认测试会话已开启、无障碍服务已启用且会话通知仍在。部分厂商会限制后台运行，可使用 App 内“后台连接与省电设置”入口允许圆伴持续运行。服务器可用 `journalctl -u orbbuddy.service` 查看设备上下线时间；MCP 服务在线不代表手机一定在线。Android 的 Doze 可能暂停网络；即使使用前台服务也不能保证所有设备在长时间锁屏后立即可达，详见 [Android 官方说明](https://developer.android.com/training/monitoring-device-state/doze-standby)。
 
+在小米澎湃 OS 实测时，还需检查系统“应用信息”里的“自启动”“通知管理”和“省电策略”：允许自启动与通知，并将省电策略设为“无限制”。更新安装包后，重新打开圆伴一次，以启动新的前台测试会话。若连接反复上下线，检查手机日志中的 `accessibility service destroyed`、`device socket failed` 和服务器日志；系统重新绑定无障碍服务时，旧连接应停止重试。
+
 ## 参考资料
 
 - [Android AccessibilityService：手势、截图与无障碍节点](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService)

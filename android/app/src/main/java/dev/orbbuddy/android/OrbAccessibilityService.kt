@@ -52,6 +52,7 @@ class OrbAccessibilityService : AccessibilityService() {
     private var revision = 1L
     private var lastServerMessageAt = 0L
     private var watchdogStarted = false
+    private var destroyed = false
 
     private val watchdog = object : Runnable {
         override fun run() {
@@ -84,6 +85,7 @@ class OrbAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        Log.i("OrbBuddy", "accessibility service connected")
         if (!receiverRegistered) {
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(reloadReceiver, IntentFilter(ACTION_RELOAD), RECEIVER_NOT_EXPORTED)
@@ -112,13 +114,17 @@ class OrbAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
+        Log.i("OrbBuddy", "accessibility service destroyed")
+        destroyed = true
+        val oldSocket = socket
+        socket = null
         if (receiverRegistered) unregisterReceiver(reloadReceiver)
-        handler.removeCallbacks(watchdog)
+        handler.removeCallbacksAndMessages(null)
         if (networkCallbackRegistered) {
             (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager)
                 .unregisterNetworkCallback(networkCallback)
         }
-        socket?.close(1000, "service stopped")
+        oldSocket?.close(1000, "service stopped")
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
         super.onDestroy()
@@ -131,6 +137,7 @@ class OrbAccessibilityService : AccessibilityService() {
     }
 
     private fun reconnect() {
+        if (destroyed) return
         socket?.close(1000, "reconfigure")
         socket = null
         val prefs = prefs()
@@ -181,7 +188,7 @@ class OrbAccessibilityService : AccessibilityService() {
     }
 
     private fun scheduleReconnect(webSocket: WebSocket) {
-        if (socket !== webSocket || !prefs().getBoolean("enabled", false)) return
+        if (destroyed || socket !== webSocket || !prefs().getBoolean("enabled", false)) return
         setStatus("断线，重连中")
         val delay = reconnectDelayMs
         reconnectDelayMs = min(reconnectDelayMs * 2, 30_000L)
