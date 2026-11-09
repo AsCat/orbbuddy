@@ -33,6 +33,7 @@ type DeviceStatus struct {
 	ID          string    `json:"id"`
 	ConnectedAt time.Time `json:"connectedAt"`
 	LastSeenAt  time.Time `json:"lastSeenAt"`
+	Paused      bool      `json:"paused"`
 }
 
 type pendingResult struct {
@@ -44,6 +45,7 @@ type device struct {
 	id          string
 	connectedAt time.Time
 	lastSeenAt  time.Time
+	paused      bool
 	conn        *websocket.Conn
 	writeMu     sync.Mutex
 	opMu        sync.Mutex
@@ -124,6 +126,14 @@ func (h *Hub) Attach(id string, conn *websocket.Conn) {
 		}
 		d.mu.Lock()
 		d.lastSeenAt = time.Now().UTC()
+		if response.ID == "__heartbeat__" && response.OK {
+			var heartbeat struct {
+				Paused bool `json:"paused"`
+			}
+			if json.Unmarshal(response.Result, &heartbeat) == nil {
+				d.paused = heartbeat.Paused
+			}
+		}
 		ch := d.pending[response.ID]
 		delete(d.pending, response.ID)
 		d.mu.Unlock()
@@ -156,8 +166,9 @@ func (h *Hub) Status() []DeviceStatus {
 	for _, d := range h.devices {
 		d.mu.Lock()
 		lastSeenAt := d.lastSeenAt
+		paused := d.paused
 		d.mu.Unlock()
-		out = append(out, DeviceStatus{ID: d.id, ConnectedAt: d.connectedAt, LastSeenAt: lastSeenAt})
+		out = append(out, DeviceStatus{ID: d.id, ConnectedAt: d.connectedAt, LastSeenAt: lastSeenAt, Paused: paused})
 	}
 	return out
 }

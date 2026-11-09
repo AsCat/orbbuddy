@@ -2,7 +2,10 @@ package dev.orbbuddy.android
 
 import android.Manifest
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -12,10 +15,17 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.Switch
 import android.widget.TextView
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var pauseButton: Button
+    private lateinit var orbSwitch: Switch
+    private var refreshing = false
+    private val stateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) = refreshStatus()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,7 +72,7 @@ class MainActivity : Activity() {
                     return@setOnClickListener
                 }
                 prefs.edit().putString("url", address).putString("token", token.text.toString())
-                    .putBoolean("enabled", true).apply()
+                    .putBoolean("enabled", true).putBoolean("paused", false).apply()
                 startSessionKeeper()
                 if (Build.VERSION.SDK_INT >= 33 &&
                     checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -80,10 +90,28 @@ class MainActivity : Activity() {
             text = "后台连接与省电设置"
             setOnClickListener { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
         })
+        orbSwitch = Switch(this).apply {
+            text = "显示圆伴卡通悬浮球"
+            isChecked = prefs.getBoolean("orb_enabled", false)
+            setOnCheckedChangeListener { _, checked ->
+                if (refreshing) return@setOnCheckedChangeListener
+                prefs.edit().putBoolean("orb_enabled", checked).apply()
+                sendBroadcast(Intent(OrbAccessibilityService.ACTION_ORB_CHANGED).setPackage(packageName))
+            }
+        }
+        add(orbSwitch)
+        pauseButton = Button(this).apply {
+            setOnClickListener {
+                prefs.edit().putBoolean("paused", !prefs.getBoolean("paused", false)).apply()
+                sendBroadcast(Intent(OrbAccessibilityService.ACTION_ORB_CHANGED).setPackage(packageName))
+                refreshStatus()
+            }
+        }
+        add(pauseButton)
         add(Button(this).apply {
             text = "停止测试会话"
             setOnClickListener {
-                prefs.edit().putBoolean("enabled", false).apply()
+                prefs.edit().putBoolean("enabled", false).putBoolean("paused", false).apply()
                 stopService(Intent(this@MainActivity, SessionService::class.java))
                 sendBroadcast(Intent(OrbAccessibilityService.ACTION_RELOAD).setPackage(packageName))
                 refreshStatus()
@@ -98,16 +126,38 @@ class MainActivity : Activity() {
         refreshStatus()
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(stateReceiver, IntentFilter(OrbAccessibilityService.ACTION_STATE_CHANGED), RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(stateReceiver, IntentFilter(OrbAccessibilityService.ACTION_STATE_CHANGED))
+        }
+    }
+
+    override fun onStop() {
+        unregisterReceiver(stateReceiver)
+        super.onStop()
+    }
+
     private fun startSessionKeeper() {
         startForegroundService(Intent(this, SessionService::class.java))
     }
 
     private fun refreshStatus() {
         val prefs = getSharedPreferences("connection", MODE_PRIVATE)
-        status.text = if (prefs.getBoolean("enabled", false)) {
+        refreshing = true
+        orbSwitch.isChecked = prefs.getBoolean("orb_enabled", false)
+        refreshing = false
+        val enabled = prefs.getBoolean("enabled", false)
+        val paused = prefs.getBoolean("paused", false)
+        pauseButton.isEnabled = enabled
+        pauseButton.text = if (paused) "继续远程访问" else "暂停远程访问"
+        status.text = if (enabled) {
             val unrestricted = (getSystemService(POWER_SERVICE) as PowerManager)
                 .isIgnoringBatteryOptimizations(packageName)
-            "测试会话已开启。连接状态：${prefs.getString("status", "等待无障碍服务")}。" +
+            "测试会话已开启。连接状态：${if (paused) "已暂停" else prefs.getString("status", "等待无障碍服务")}。" +
                 if (unrestricted) "后台省电限制已关闭" else "若锁屏后断线，请在后台连接设置中允许持续运行"
         } else "测试会话已停止"
     }

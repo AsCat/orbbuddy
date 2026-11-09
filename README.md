@@ -4,7 +4,7 @@
 
 ## 模块
 
-- `android/`：Android 11+ 客户端。用户手动启用无障碍服务，填写 `wss://` 地址和设备令牌，开启或停止测试会话。
+- `android/`：Android 11+ 客户端。用户手动启用无障碍服务，填写 `wss://` 地址和设备令牌，开启或停止测试会话；可选卡通悬浮球提供手机端暂停入口。
 - `server/`：单个 Go 进程，接收手机 WebSocket 长连接，并提供 Streamable HTTP MCP 接口；不持久化屏幕内容。
 - `deploy/`：systemd 与 Nginx 示例配置。线上入口为 `orb.yuanxuyinli.com`，Go 只监听本机端口。
 
@@ -34,13 +34,15 @@ ORBBUDDY_DEVICE_URL='ws://127.0.0.1:8080/device?id=primary' \
 ORBBUDDY_DEVICE_TOKEN=dev-device go run ./cmd/mock-device
 ```
 
-Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运行 `./gradlew :app:assembleDebug`。调试包允许明文 `ws://` 连接本机服务；正式包只接受 `wss://`。手机无需 USB 或无线 ADB 才能正常连接服务器。首次使用需手动安装 App、启用无障碍服务并保存连接配置。会话开启时显示前台通知、持有部分唤醒锁，网络切换时主动重连；**持续会话会增加耗电**，用 App 内“停止测试会话”可释放唤醒锁。部分机型仍可能要求设置后台运行许可。
+Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运行 `./gradlew :app:assembleDebug`。调试包允许明文 `ws://` 连接本机服务；正式包只接受 `wss://`。手机无需 USB 或无线 ADB 才能正常连接服务器。首次使用需手动安装 App、启用无障碍服务并保存连接配置。会话开启时显示前台通知、持有部分唤醒锁，网络切换时主动重连；**持续会话会增加耗电**，用 App 内“停止测试会话”可释放唤醒锁。用户保持会话开启时，App 会尝试在手机重启或更新后恢复前台会话；厂商后台限制仍可能阻止恢复。
+
+可在 App 内打开卡通悬浮球：轻微呼吸、眨眼、显示连接状态，支持拖动贴边。点击后可暂停/恢复远程访问或隐藏悬浮球；暂停会拒绝除心跳外的所有设备命令。悬浮球默认关闭，使用无障碍悬浮层；读屏截图和远程手势执行时会暂时隐藏它。详见[快速开始](docs/quickstart.md)。
 
 ## MCP 工具
 
 | 工具 | 主要参数 | 结果 |
 | --- | --- | --- |
-| `device_status` | 无 | 在线设备、连接时间及最后心跳时间 |
+| `device_status` | 无 | 在线设备、连接时间、最后心跳时间及手机端暂停状态 |
 | `get_screen` | `deviceId?` | 节点树、尺寸、修订号、JPEG |
 | `tap_element` | `revision`, `path`, `deviceId?` | 点击结果 |
 | `tap` | `x`, `y`, `deviceId?` | 点击结果 |
@@ -59,21 +61,23 @@ Go 服务配置 `ORBBUDDY_LISTEN=127.0.0.1:18093`、`ORBBUDDY_DEVICE_TOKEN` 和 
 
 MCP 地址：`https://orb.yuanxuyinli.com/mcp`
 
-客户端配置见 [docs/client-setup.md](docs/client-setup.md)，后续阶段见 [docs/roadmap.md](docs/roadmap.md)。
+安装与验收见 [docs/quickstart.md](docs/quickstart.md)，客户端配置见 [docs/client-setup.md](docs/client-setup.md)，后续阶段见 [docs/roadmap.md](docs/roadmap.md)。
 
 ## 当前边界与下一步
 
 这是面向个人开发测试的首版。无障碍服务能读取的节点由目标 App 决定；`FLAG_SECURE` 等受保护窗口不能保证截图。Android 11+ 的包可见性限制会影响应用信息查询；当前安装包申请 `QUERY_ALL_PACKAGES`，适合开发者侧载，若发布到 Google Play 需按政策重新设计该功能。
 
-目前**没有支付与下单确认流程**，不要让智能体执行付款或最终提交订单。未来增加悬浮球时，以手机端本地确认为准：智能体仅可准备草稿，最终下单/支付由用户在手机上确认；确认有短时效且只适用于当前订单摘要；取消或超时立即拒绝；完成后提供可行的撤销/售后入口。敏感输入只由用户在手机本地填写，不返回到 MCP。
+目前**没有支付与下单确认流程**，不要让智能体执行付款或最终提交订单。悬浮球当前只提供会话暂停与恢复，不代表订单授权。未来增加下单能力时，以手机端本地确认为准：智能体仅可准备草稿，最终下单/支付由用户在手机上确认；确认有短时效且只适用于当前订单摘要；取消或超时立即拒绝；完成后提供可行的撤销/售后入口。敏感输入只由用户在手机本地填写，不返回到 MCP。
 
 若 `device_status` 返回空列表，先在手机打开圆伴，确认测试会话已开启、无障碍服务已启用且会话通知仍在。部分厂商会限制后台运行，可使用 App 内“后台连接与省电设置”入口允许圆伴持续运行。服务器可用 `journalctl -u orbbuddy.service` 查看设备上下线时间；MCP 服务在线不代表手机一定在线。Android 的 Doze 可能暂停网络；即使使用前台服务也不能保证所有设备在长时间锁屏后立即可达，详见 [Android 官方说明](https://developer.android.com/training/monitoring-device-state/doze-standby)。
 
-在小米澎湃 OS 实测时，还需检查系统“应用信息”里的“自启动”“通知管理”和“省电策略”：允许自启动与通知，并将省电策略设为“无限制”。更新安装包后，重新打开圆伴一次，以启动新的前台测试会话。若连接反复上下线，检查手机日志中的 `accessibility service destroyed`、`device socket failed` 和服务器日志；系统重新绑定无障碍服务时，旧连接应停止重试。
+在小米澎湃 OS 实测时，还需检查系统“应用信息”里的“自启动”“通知管理”和“省电策略”：允许自启动与通知，并将省电策略设为“无限制”。更新或重启后若会话没有自动恢复，重新打开圆伴一次。若连接反复上下线，检查手机日志中的 `accessibility service destroyed`、`device socket failed` 和服务器日志；系统重新绑定无障碍服务时，旧连接应停止重试。
 
 ## 参考资料
 
 - [Android AccessibilityService：手势、截图与无障碍节点](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService)
+- [Android 无障碍悬浮层窗口类型](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#TYPE_ACCESSIBILITY_OVERLAY)
+- [Android 前台服务后台启动限制](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)
 - [Android package visibility](https://developer.android.com/training/package-visibility)
 - [Model Context Protocol Go SDK](https://github.com/modelcontextprotocol/go-sdk)
 - [MCP Streamable HTTP 规范](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)

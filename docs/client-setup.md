@@ -20,4 +20,4 @@ tool_timeout_sec = 30
 
 若 WorkBuddy 或其他客户端支持远程 Streamable HTTP MCP，可填写相同 URL 和 Bearer 令牌。若客户端只支持 stdio，需要一个本地 stdio 转发适配器；该适配器尚未纳入 MVP。不能仅凭产品名称推断其 MCP 兼容性。
 
-先调用 `device_status`，确认 `primary` 在线，再调用 `get_screen`。界面树有 `path` 和 `revision`，元素操作优先使用 `tap_element`；修订号过期时重新读屏。截图返回为 MCP image 内容块，供视觉模型读取。
+先调用 `device_status`，确认 `primary` 在线且 `paused` 为 `false`，再调用 `get_screen`。手机端暂停时，所有读屏和操作命令会被拒绝，用户需在手机 App 或悬浮球上恢复。界面树有 `path` 和 `revision`，元素操作优先使用 `tap_element`；修订号过期时重新读屏。截图返回为 MCP image 内容块，供视觉模型读取。

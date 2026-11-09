@@ -1,4 +1,4 @@
-name: Go checks
+name: Build and test
 
 on:
   push:
@@ -17,3 +17,28 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
       - run: go test ./...
+  android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle.kts
+            android/gradle/wrapper/gradle-wrapper.properties
+      - uses: android-actions/setup-android@v4
+      - name: Install Android SDK 34
+        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbbuddy-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7

@@ -40,6 +40,8 @@ import kotlin.math.min
 class OrbAccessibilityService : AccessibilityService() {
     companion object {
         const val ACTION_RELOAD = "dev.orbbuddy.android.RELOAD"
+        const val ACTION_ORB_CHANGED = "dev.orbbuddy.android.ORB_CHANGED"
+        const val ACTION_STATE_CHANGED = "dev.orbbuddy.android.STATE_CHANGED"
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -53,6 +55,7 @@ class OrbAccessibilityService : AccessibilityService() {
     private var lastServerMessageAt = 0L
     private var watchdogStarted = false
     private var destroyed = false
+    private var overlay: OrbOverlay? = null
 
     private val watchdog = object : Runnable {
         override fun run() {
@@ -80,6 +83,7 @@ class OrbAccessibilityService : AccessibilityService() {
     private val reloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == ACTION_RELOAD) reconnect()
+            if (intent?.action == ACTION_ORB_CHANGED) syncOverlay()
         }
     }
 
@@ -87,14 +91,31 @@ class OrbAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         Log.i("OrbBuddy", "accessibility service connected")
         if (!receiverRegistered) {
+            val filter = IntentFilter().apply {
+                addAction(ACTION_RELOAD)
+                addAction(ACTION_ORB_CHANGED)
+            }
             if (Build.VERSION.SDK_INT >= 33) {
-                registerReceiver(reloadReceiver, IntentFilter(ACTION_RELOAD), RECEIVER_NOT_EXPORTED)
+                registerReceiver(reloadReceiver, filter, RECEIVER_NOT_EXPORTED)
             } else {
                 @Suppress("DEPRECATION")
-                registerReceiver(reloadReceiver, IntentFilter(ACTION_RELOAD))
+                registerReceiver(reloadReceiver, filter)
             }
             receiverRegistered = true
         }
+        if (overlay == null) {
+            overlay = OrbOverlay(this, onPauseToggle = {
+                val paused = !prefs().getBoolean("paused", false)
+                prefs().edit().putBoolean("paused", paused).apply()
+                syncOverlay()
+                notifyStateChanged()
+            }, onHide = {
+                prefs().edit().putBoolean("orb_enabled", false).apply()
+                syncOverlay()
+                notifyStateChanged()
+            })
+        }
+        syncOverlay()
         reconnect()
         if (!networkCallbackRegistered) {
             (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager)
@@ -108,7 +129,8 @@ class OrbAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event != null) revision++
+        // Showing or hiding our own orb must not invalidate paths in the target app.
+        if (event != null && event.packageName?.toString() != packageName) revision++
     }
 
     override fun onInterrupt() = Unit
@@ -118,6 +140,8 @@ class OrbAccessibilityService : AccessibilityService() {
         destroyed = true
         val oldSocket = socket
         socket = null
+        overlay?.destroy()
+        overlay = null
         if (receiverRegistered) unregisterReceiver(reloadReceiver)
         handler.removeCallbacksAndMessages(null)
         if (networkCallbackRegistered) {
@@ -134,6 +158,21 @@ class OrbAccessibilityService : AccessibilityService() {
 
     private fun setStatus(value: String) {
         prefs().edit().putString("status", value).apply()
+        syncOverlay()
+        notifyStateChanged()
+    }
+
+    private fun notifyStateChanged() {
+        sendBroadcast(Intent(ACTION_STATE_CHANGED).setPackage(packageName))
+    }
+
+    private fun syncOverlay() {
+        val settings = prefs()
+        overlay?.sync(
+            settings.getBoolean("enabled", false) && settings.getBoolean("orb_enabled", false),
+            settings.getBoolean("paused", false),
+            settings.getString("status", "连接中") ?: "连接中"
+        )
     }
 
     private fun reconnect() {
@@ -201,8 +240,12 @@ class OrbAccessibilityService : AccessibilityService() {
             val command = JSONObject(text)
             id = command.getString("id")
             val params = command.optJSONObject("params") ?: JSONObject()
+            if (command.getString("method") != "heartbeat" && prefs().getBoolean("paused", false)) {
+                replyError(webSocket, id, "remote access is paused on the phone")
+                return
+            }
             when (command.getString("method")) {
-                "heartbeat" -> replyOK(webSocket, id, JSONObject().put("alive", true))
+                "heartbeat" -> replyOK(webSocket, id, JSONObject().put("alive", true).put("paused", prefs().getBoolean("paused", false)))
                 "get_screen" -> getScreen(webSocket, id)
                 "tap_element" -> tapElement(webSocket, id, params)
                 "tap" -> gesture(webSocket, id, params.getInt("x"), params.getInt("y"), null, null, 60L)
@@ -219,41 +262,56 @@ class OrbAccessibilityService : AccessibilityService() {
     }
 
     private fun getScreen(webSocket: WebSocket, id: String) {
-        val size = displaySize()
-        val tree = rootInActiveWindow?.let { nodeTree(it, "0", intArrayOf(0), 0) } ?: JSONObject.NULL
-        val result = JSONObject().put("revision", revision).put("width", size.x).put("height", size.y)
-            .put("tree", tree)
-        takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
-            override fun onSuccess(screenshot: ScreenshotResult) {
-                try {
-                    val buffer = screenshot.hardwareBuffer
-                    val source = Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
-                    buffer.close()
-                    if (source == null) throw IllegalStateException("empty screenshot")
-                    val software = source.copy(Bitmap.Config.ARGB_8888, false)
-                        ?: throw IllegalStateException("cannot copy screenshot bitmap")
-                    source.recycle()
-                    val scale = min(1.0, 1280.0 / maxOf(software.width, software.height))
-                    val width = (software.width * scale).toInt().coerceAtLeast(1)
-                    val height = (software.height * scale).toInt().coerceAtLeast(1)
-                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                    Canvas(bitmap).drawBitmap(software, null, Rect(0, 0, width, height), Paint(Paint.FILTER_BITMAP_FLAG))
-                    software.recycle()
-                    val bytes = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 70, bytes)
-                    bitmap.recycle()
-                    result.put("imageBase64", Base64.getEncoder().encodeToString(bytes.toByteArray()))
-                } catch (e: Exception) {
-                    result.put("imageError", e.message ?: "screenshot conversion failed")
+        val orb = overlay
+        orb?.hideForCapture()
+        handler.postDelayed({
+            if (destroyed) return@postDelayed
+            try {
+                val size = displaySize()
+                val tree = rootInActiveWindow?.let { nodeTree(it, "0", intArrayOf(0), 0) } ?: JSONObject.NULL
+                val result = JSONObject().put("revision", revision).put("width", size.x).put("height", size.y)
+                    .put("tree", tree)
+                fun complete() {
+                    orb?.restoreAfterCapture()
+                    if (prefs().getBoolean("paused", false)) replyError(webSocket, id, "remote access is paused on the phone")
+                    else replyOK(webSocket, id, result)
                 }
-                replyOK(webSocket, id, result)
-            }
+                takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                    override fun onSuccess(screenshot: ScreenshotResult) {
+                        try {
+                            val buffer = screenshot.hardwareBuffer
+                            val source = Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
+                            buffer.close()
+                            if (source == null) throw IllegalStateException("empty screenshot")
+                            val software = source.copy(Bitmap.Config.ARGB_8888, false)
+                                ?: throw IllegalStateException("cannot copy screenshot bitmap")
+                            source.recycle()
+                            val scale = min(1.0, 1280.0 / maxOf(software.width, software.height))
+                            val width = (software.width * scale).toInt().coerceAtLeast(1)
+                            val height = (software.height * scale).toInt().coerceAtLeast(1)
+                            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                            Canvas(bitmap).drawBitmap(software, null, Rect(0, 0, width, height), Paint(Paint.FILTER_BITMAP_FLAG))
+                            software.recycle()
+                            val bytes = ByteArrayOutputStream()
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 70, bytes)
+                            bitmap.recycle()
+                            result.put("imageBase64", Base64.getEncoder().encodeToString(bytes.toByteArray()))
+                        } catch (e: Exception) {
+                            result.put("imageError", e.message ?: "screenshot conversion failed")
+                        }
+                        complete()
+                    }
 
-            override fun onFailure(errorCode: Int) {
-                result.put("imageError", "Android screenshot error $errorCode")
-                replyOK(webSocket, id, result)
+                    override fun onFailure(errorCode: Int) {
+                        result.put("imageError", "Android screenshot error $errorCode")
+                        complete()
+                    }
+                })
+            } catch (e: RuntimeException) {
+                orb?.restoreAfterCapture()
+                replyError(webSocket, id, e.message ?: "screenshot failed")
             }
-        })
+        }, if (orb == null) 0L else 50L)
     }
 
     private fun nodeTree(node: AccessibilityNodeInfo, path: String, count: IntArray, depth: Int): JSONObject {
@@ -319,16 +377,28 @@ class OrbAccessibilityService : AccessibilityService() {
         }
         val description = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, duration)).build()
-        val accepted = dispatchGesture(description, object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                replyOK(webSocket, id, JSONObject().put("done", true))
-            }
+        val orb = overlay
+        orb?.hideForCapture()
+        val accepted = try {
+            dispatchGesture(description, object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    orb?.restoreAfterCapture()
+                    replyOK(webSocket, id, JSONObject().put("done", true))
+                }
 
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                replyError(webSocket, id, "gesture cancelled")
-            }
-        }, handler)
-        if (!accepted) replyError(webSocket, id, "gesture rejected")
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    orb?.restoreAfterCapture()
+                    replyError(webSocket, id, "gesture cancelled")
+                }
+            }, handler)
+        } catch (e: RuntimeException) {
+            orb?.restoreAfterCapture()
+            throw e
+        }
+        if (!accepted) {
+            orb?.restoreAfterCapture()
+            replyError(webSocket, id, "gesture rejected")
+        }
     }
 
     private fun inputText(webSocket: WebSocket, id: String, text: String) {
