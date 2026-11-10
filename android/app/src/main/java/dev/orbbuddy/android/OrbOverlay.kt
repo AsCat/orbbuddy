@@ -100,6 +100,10 @@ class OrbOverlay(
         }
     }
 
+    fun react(reaction: OrbReaction, direction: Float = 1f) {
+        if (!paused && !captureHidden) orb?.react(reaction, direction)
+    }
+
     fun destroy() = hide()
 
     private fun statusLabel() = when {

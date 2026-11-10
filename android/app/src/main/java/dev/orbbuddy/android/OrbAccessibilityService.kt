@@ -398,7 +398,10 @@ class OrbAccessibilityService : AccessibilityService() {
                     orb?.restoreAfterCapture()
                     if (prefs().getBoolean("paused", false)) replyError(webSocket, id, "remote access is paused on the phone")
                     else if (apiGrantId != null && !validAPIGrant(apiGrantId)) replyError(webSocket, id, "remote API authorization revoked")
-                    else replyOK(webSocket, id, result)
+                    else {
+                        if (result.has("imageBase64")) orb?.react(OrbReaction.LOOK)
+                        replyOK(webSocket, id, result)
+                    }
                 }
                 takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
                     override fun onSuccess(screenshot: ScreenshotResult) {
@@ -480,6 +483,7 @@ class OrbAccessibilityService : AccessibilityService() {
             return
         }
         if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            overlay?.react(OrbReaction.TAP)
             replyOK(webSocket, id, JSONObject().put("done", true))
             return
         }
@@ -508,6 +512,10 @@ class OrbAccessibilityService : AccessibilityService() {
             dispatchGesture(description, object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
                     orb?.restoreAfterCapture()
+                    if (x2 != null && y2 != null) {
+                        val direction = if (kotlin.math.abs(x2 - x1) >= kotlin.math.abs(y2 - y1)) x2 - x1 else y2 - y1
+                        orb?.react(OrbReaction.SWIPE, direction.toFloat())
+                    } else orb?.react(OrbReaction.TAP)
                     replyOK(webSocket, id, JSONObject().put("done", true))
                 }
 
@@ -540,6 +548,7 @@ class OrbAccessibilityService : AccessibilityService() {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
         if (field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+            overlay?.react(OrbReaction.TAP)
             replyOK(webSocket, id, JSONObject().put("done", true))
         } else replyError(webSocket, id, "field rejected text input")
     }
@@ -555,6 +564,7 @@ class OrbAccessibilityService : AccessibilityService() {
         }
         if (performGlobalAction(action)) {
             if (apiControl) prefs().edit().putBoolean("api_control_suspended", true).apply()
+            overlay?.react(OrbReaction.SWIPE, -1f)
             replyOK(webSocket, id, JSONObject().put("done", true))
         }
         else replyError(webSocket, id, "global action failed")
