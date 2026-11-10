@@ -25,6 +25,8 @@
 
 公开说明在 https://orb.yuanxuyinli.com/ ，机器可读契约在 https://orb.yuanxuyinli.com/openapi.json 。下例使用占位口令与令牌：
 
+公开存活检查为 `GET https://orb.yuanxuyinli.com/health`，无需授权，固定返回 `{"ok":true}`。Nginx 将它精确转发到既有的本机 `/healthz`；响应不包含设备状态、截图或令牌，也不缓存。此接口只表示 Web 入口和 Go 进程可用，不代表手机在线。
+
     curl -sS -X POST https://orb.yuanxuyinli.com/api/v1/auth/pair \
       -H 'Content-Type: application/json' \
       -d '{"device_id":"primary","code":"0000"}'
