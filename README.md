@@ -61,7 +61,7 @@ Go 服务配置 `ORBBUDDY_LISTEN=127.0.0.1:18093`、`ORBBUDDY_DEVICE_TOKEN` 和 
 
 MCP 地址：`https://orb.yuanxuyinli.com/mcp`
 
-安装与验收见 [docs/quickstart.md](docs/quickstart.md)，客户端配置见 [docs/client-setup.md](docs/client-setup.md)，后续阶段见 [docs/roadmap.md](docs/roadmap.md)。
+安装与验收见 [docs/quickstart.md](docs/quickstart.md)，客户端配置见 [docs/client-setup.md](docs/client-setup.md)。开源版本路线和 iOS 可行性见 [开源发展计划](docs/open-source-plan.md)，既有功能进度见 [实施路线](docs/roadmap.md)。
 
 ## 当前边界与下一步
 
