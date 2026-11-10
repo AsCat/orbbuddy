@@ -18,7 +18,7 @@ Android 无障碍服务 ── WSS/移动网络 ──> 公网可达的 Go relay
 
 **使用者必须有自己的公网 IP 吗？**不必。手机和电脑都主动向中转入口发起出站连接；中转入口可部署在已有 VPS、云主机，或由未来的托管服务提供。当前开源版使用全局设备/MCP 令牌，适合一个人自托管，**不支持多个互不信任的用户共用同一实例**。维护者域名是个人实例，不是公共中转服务。详见[部署方式与步骤](docs/self-host.md)。
 
-手机断线后自动退避重连。每次 `get_screen` 读取当前无障碍节点树并尝试截取一张压缩 JPEG；`tap_element` 使用该次读屏返回的 `revision` 与节点 `path`，界面变化后必须重新读屏。截图被 Android 拒绝或安全窗口遮挡时，仍可返回可见的节点树和 `imageError`。
+手机断线后自动退避重连。`get_screen` 默认读取当前无障碍节点树及压缩 JPEG；可用 `includeImage=false` 只取界面树，或设置 `maxImageEdge` 为 320–1280 像素。`tap_element` 使用该次读屏返回的 `revision` 与节点 `path`，界面变化后必须重新读屏。截图被 Android 拒绝或安全窗口遮挡时，仍可返回可见的节点树和 `imageError`。
 
 ## 本地开发
 
@@ -38,22 +38,23 @@ ORBBUDDY_DEVICE_TOKEN=dev-device go run ./cmd/mock-device
 
 Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运行 `./gradlew :app:assembleDebug`。调试包允许明文 `ws://` 连接本机服务；正式包只接受 `wss://`。手机无需 USB 或无线 ADB 才能正常连接服务器。首次使用需手动安装 App、启用无障碍服务并保存连接配置。会话开启时显示前台通知、持有部分唤醒锁，网络切换时主动重连；**持续会话会增加耗电**，用 App 内“停止测试会话”可释放唤醒锁。用户保持会话开启时，App 会尝试在手机重启或更新后恢复前台会话；厂商后台限制仍可能阻止恢复。
 
-可在 App 内打开卡通悬浮球，并从圆圆、芽芽、星星三款角色中选择。角色有轻微呼吸、眨眼和连接状态点，支持拖动贴边；远程读屏与操作完成后会播放不同的短动画。点击角色可生成并查看 60 秒 HTTPS 只读授权码，或为主界面预先指定的可调试 App 生成测试控制码；菜单还能暂停/恢复、撤销授权或隐藏。悬浮球默认关闭，使用无障碍悬浮层；读屏截图和远程手势执行时会暂时隐藏整个悬浮层。详见[悬浮角色与授权码](docs/orb-character.md)和[快速开始](docs/quickstart.md)。
+可在 App 内打开卡通悬浮球，并从圆圆、芽芽、星星三款角色中选择。角色有轻微呼吸、眨眼和连接状态点，支持拖动贴边；远程读屏与操作完成后会播放不同的短动画。点击角色可生成并查看 60 秒 HTTPS 只读授权码，或为主界面预先指定的可调试 App 生成测试控制码；菜单还能暂停/恢复、撤销授权或隐藏。长按角色或点菜单的“开启无线调试”可运行手机本地快捷流程；成功的界面元素标识留在本机，下一次优先匹配。悬浮球默认关闭，使用无障碍悬浮层；读屏截图和远程手势执行时会暂时隐藏整个悬浮层。详见[快捷操作与多设备](docs/shortcuts.md)和[悬浮角色与授权码](docs/orb-character.md)。
 
 ## MCP 工具
 
 | 工具 | 主要参数 | 结果 |
 | --- | --- | --- |
-| `device_status` | 无 | 在线设备、连接时间、最后心跳时间及手机端暂停状态 |
-| `get_screen` | `deviceId?` | 节点树、尺寸、修订号、JPEG |
+| `device_status` | 无 | 在线设备、型号、连接时间、最后心跳时间及暂停状态 |
+| `get_screen` | `deviceId?`, `includeImage?`, `maxImageEdge?` | 节点树、尺寸、修订号、可选 JPEG |
 | `tap_element` | `revision`, `path`, `deviceId?` | 点击结果 |
 | `tap` | `x`, `y`, `deviceId?` | 点击结果 |
 | `swipe` | `x1`, `y1`, `x2`, `y2`, `durationMs`, `deviceId?` | 滑动结果 |
 | `input_text` | `text`, `deviceId?` | 替换当前聚焦输入框内容 |
 | `press_key` | `key=back/home`, `deviceId?` | 系统返回或主页 |
 | `get_app_info` | `packageName`, `deviceId?` | 包名、版本、应用名称 |
+| `open_wireless_debugging_settings` | `deviceId?` | 尝试打开无线调试页，系统不支持直达时打开开发者选项 |
 
-`deviceId` 默认 `primary`。坐标使用手机原始像素尺寸，即使 JPEG 缩小也不改变坐标系。协议见 [docs/protocol.md](docs/protocol.md)。
+只有一台手机在线时可省略 `deviceId`；多台在线时必须指定，如 `primary`（小米）或 `samsung`。坐标使用手机原始像素尺寸，即使 JPEG 缩小也不改变坐标系。协议见 [docs/protocol.md](docs/protocol.md)。
 
 ## 部署
 
@@ -63,7 +64,7 @@ Go 服务配置 `ORBBUDDY_LISTEN=127.0.0.1:18093`、`ORBBUDDY_DEVICE_TOKEN` 和 
 
 MCP 地址：`https://你的域名/mcp`
 
-安装与验收见 [docs/quickstart.md](docs/quickstart.md)，客户端配置见 [docs/client-setup.md](docs/client-setup.md)。发布签名与验证见 [Android 发布签名](docs/release-signing.md)。开源版本路线和 iOS 可行性见 [开源发展计划](docs/open-source-plan.md)，既有功能进度见 [实施路线](docs/roadmap.md)。
+安装与验收见 [docs/quickstart.md](docs/quickstart.md)，客户端配置见 [docs/client-setup.md](docs/client-setup.md)，手机快捷动作和 `orb-adb` 见 [快捷操作与多设备](docs/shortcuts.md)。发布签名与验证见 [Android 发布签名](docs/release-signing.md)。开源版本路线和 iOS 可行性见 [开源发展计划](docs/open-source-plan.md)，既有功能进度见 [实施路线](docs/roadmap.md)。
 
 ## 当前边界与下一步
 

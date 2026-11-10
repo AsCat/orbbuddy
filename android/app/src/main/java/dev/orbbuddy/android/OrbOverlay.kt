@@ -19,6 +19,7 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import kotlin.math.abs
 
 /** An optional, locally controlled accessibility overlay. Codes still require server pairing. */
@@ -28,6 +29,7 @@ class OrbOverlay(
     private val onAPIRevoke: () -> Unit,
     private val onHide: () -> Unit,
     private val onPairCodeRequest: (String) -> PairingCode.Result,
+    private val onWirelessDebugRequest: () -> Unit,
 ) {
     private val manager = service.getSystemService(WindowManager::class.java)
     private val prefs = service.getSharedPreferences("connection", Context.MODE_PRIVATE)
@@ -77,7 +79,7 @@ class OrbOverlay(
             this.paused = paused
             this.connected = status == "已连接"
             this.character = OrbCharacter.from(prefs.getString("orb_character", null))
-            contentDescription = "圆伴悬浮球，${if (paused) "已暂停" else if (apiActive) "HTTPS 远程访问中" else status}。点击打开会话控制，拖动可移动"
+            contentDescription = "圆伴悬浮球，${if (paused) "已暂停" else if (apiActive) "HTTPS 远程访问中" else status}。点击打开会话控制，长按开启无线调试，拖动可移动"
             invalidate()
         }
         menuStatus?.text = statusLabel()
@@ -102,6 +104,10 @@ class OrbOverlay(
 
     fun react(reaction: OrbReaction, direction: Float = 1f) {
         if (!paused && !captureHidden) orb?.react(reaction, direction)
+    }
+
+    fun showMessage(message: String) {
+        Toast.makeText(service, message, Toast.LENGTH_LONG).show()
     }
 
     fun destroy() = hide()
@@ -187,6 +193,8 @@ class OrbOverlay(
                     params.x = if (params.x + size / 2 < screen.x / 2) edge else screen.x - size - edge
                     orb?.let { manager.updateViewLayout(it, params) }
                     prefs.edit().putInt("orb_x", params.x).putInt("orb_y", params.y).apply()
+                } else if (!dragging && !endedAway && event.eventTime - downAt >= ViewConfiguration.getLongPressTimeout()) {
+                    onWirelessDebugRequest()
                 } else {
                     params.x = startX
                     params.y = startY
@@ -211,7 +219,7 @@ class OrbOverlay(
         val x = (if (params.x < screen.x / 2) params.x else params.x + size - width)
             .coerceIn(0, (screen.x - width).coerceAtLeast(0))
         val hasRevokeAction = apiActive || PairingCode.active(service) != null
-        val menuHeight = dp(if (hasRevokeAction) 365 else 317)
+        val menuHeight = dp(if (hasRevokeAction) 413 else 365)
         val y = (if (params.y > menuHeight + dp(10)) params.y - menuHeight else params.y + size + dp(8))
             .coerceIn(0, (screen.y - menuHeight).coerceAtLeast(0))
         val panel = LinearLayout(service).apply {
@@ -239,6 +247,13 @@ class OrbOverlay(
         }
         menuLine("生成测试控制码", true).also {
             it.setOnClickListener { generateCode("controller") }
+            panel.addView(it)
+        }
+        menuLine("开启无线调试", true).also {
+            it.setOnClickListener {
+                hideMenu()
+                onWirelessDebugRequest()
+            }
             panel.addView(it)
         }
         pauseAction = menuLine(if (paused) "继续远程访问" else "暂停远程访问", true).also {

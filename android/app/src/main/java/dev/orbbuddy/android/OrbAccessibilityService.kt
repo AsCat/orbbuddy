@@ -59,6 +59,7 @@ class OrbAccessibilityService : AccessibilityService() {
     private var watchdogStarted = false
     private var destroyed = false
     private var overlay: OrbOverlay? = null
+    private var wirelessShortcut: WirelessDebugShortcut? = null
 
     private val watchdog = object : Runnable {
         override fun run() {
@@ -114,6 +115,10 @@ class OrbAccessibilityService : AccessibilityService() {
             receiverRegistered = true
         }
         if (overlay == null) {
+            wirelessShortcut = WirelessDebugShortcut(this, handler,
+                report = { overlay?.showMessage(it) },
+                beforeGesture = { overlay?.hideForCapture() },
+                afterGesture = { overlay?.restoreAfterCapture() })
             overlay = OrbOverlay(this, onPauseToggle = {
                 val paused = !prefs().getBoolean("paused", false)
                 prefs().edit().putBoolean("paused", paused).apply()
@@ -131,7 +136,7 @@ class OrbAccessibilityService : AccessibilityService() {
                 val result = PairingCode.create(this, scope, target)
                 notifyStateChanged()
                 result
-            })
+            }, onWirelessDebugRequest = { wirelessShortcut?.start() })
         }
         syncOverlay()
         reconnect()
@@ -160,6 +165,8 @@ class OrbAccessibilityService : AccessibilityService() {
         socket = null
         overlay?.destroy()
         overlay = null
+        wirelessShortcut?.cancel()
+        wirelessShortcut = null
         if (receiverRegistered) unregisterReceiver(reloadReceiver)
         handler.removeCallbacksAndMessages(null)
         if (networkCallbackRegistered) {
@@ -279,7 +286,9 @@ class OrbAccessibilityService : AccessibilityService() {
                 return
             }
             when (method) {
-                "heartbeat" -> replyOK(webSocket, id, JSONObject().put("alive", true).put("paused", prefs().getBoolean("paused", false)))
+                "heartbeat" -> replyOK(webSocket, id, JSONObject().put("alive", true)
+                    .put("paused", prefs().getBoolean("paused", false))
+                    .put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL))
                 "auth_pair" -> pairAPI(webSocket, id, params.optString("code", ""))
                 "auth_lockout" -> {
                     prefs().edit().putString("api_auth_notice", "配对错误过多，请稍后再试").apply()
@@ -290,7 +299,7 @@ class OrbAccessibilityService : AccessibilityService() {
                     clearAPIGrant()
                     replyOK(webSocket, id, JSONObject().put("done", true))
                 }
-                "get_screen" -> getScreen(webSocket, id, apiGrantId.ifEmpty { null })
+                "get_screen" -> getScreen(webSocket, id, apiGrantId.ifEmpty { null }, params)
                 "tap_element" -> tapElement(webSocket, id, params)
                 "tap" -> gesture(webSocket, id, params.getInt("x"), params.getInt("y"), null, null, 60L)
                 "swipe" -> gesture(webSocket, id, params.getInt("x1"), params.getInt("y1"),
@@ -298,6 +307,7 @@ class OrbAccessibilityService : AccessibilityService() {
                 "input_text" -> inputText(webSocket, id, params.getString("text"))
                 "press_key" -> pressKey(webSocket, id, params.getString("key"), apiGrantId.isNotEmpty())
                 "get_app_info" -> getAppInfo(webSocket, id, params.getString("packageName"))
+                "open_wireless_debugging_settings" -> openWirelessDebuggingSettings(webSocket, id)
                 else -> replyError(webSocket, id, "unknown method")
             }
         } catch (e: Exception) {
@@ -384,9 +394,15 @@ class OrbAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun getScreen(webSocket: WebSocket, id: String, apiGrantId: String?) {
+    private fun getScreen(webSocket: WebSocket, id: String, apiGrantId: String?, params: JSONObject) {
+        val includeImage = params.optBoolean("includeImage", true)
+        val maxImageEdge = params.optInt("maxImageEdge", 1280)
+        if (includeImage && maxImageEdge !in 320..1280) {
+            replyError(webSocket, id, "maxImageEdge must be 320..1280")
+            return
+        }
         val orb = overlay
-        orb?.hideForCapture()
+        if (includeImage) orb?.hideForCapture()
         handler.postDelayed({
             if (destroyed) return@postDelayed
             try {
@@ -395,13 +411,17 @@ class OrbAccessibilityService : AccessibilityService() {
                 val result = JSONObject().put("revision", revision).put("width", size.x).put("height", size.y)
                     .put("tree", tree)
                 fun complete() {
-                    orb?.restoreAfterCapture()
+                    if (includeImage) orb?.restoreAfterCapture()
                     if (prefs().getBoolean("paused", false)) replyError(webSocket, id, "remote access is paused on the phone")
                     else if (apiGrantId != null && !validAPIGrant(apiGrantId)) replyError(webSocket, id, "remote API authorization revoked")
                     else {
                         if (result.has("imageBase64")) orb?.react(OrbReaction.LOOK)
                         replyOK(webSocket, id, result)
                     }
+                }
+                if (!includeImage) {
+                    complete()
+                    return@postDelayed
                 }
                 takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
                     override fun onSuccess(screenshot: ScreenshotResult) {
@@ -413,7 +433,7 @@ class OrbAccessibilityService : AccessibilityService() {
                             val software = source.copy(Bitmap.Config.ARGB_8888, false)
                                 ?: throw IllegalStateException("cannot copy screenshot bitmap")
                             source.recycle()
-                            val scale = min(1.0, 1280.0 / maxOf(software.width, software.height))
+                            val scale = min(1.0, maxImageEdge.toDouble() / maxOf(software.width, software.height))
                             val width = (software.width * scale).toInt().coerceAtLeast(1)
                             val height = (software.height * scale).toInt().coerceAtLeast(1)
                             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -436,10 +456,10 @@ class OrbAccessibilityService : AccessibilityService() {
                     }
                 })
             } catch (e: RuntimeException) {
-                orb?.restoreAfterCapture()
+                if (includeImage) orb?.restoreAfterCapture()
                 replyError(webSocket, id, e.message ?: "screenshot failed")
             }
-        }, if (orb == null) 0L else 50L)
+        }, if (orb == null || !includeImage) 0L else 50L)
     }
 
     private fun nodeTree(node: AccessibilityNodeInfo, path: String, count: IntArray, depth: Int): JSONObject {
@@ -452,6 +472,8 @@ class OrbAccessibilityService : AccessibilityService() {
             .put("description", node.contentDescription?.toString() ?: "")
             .put("viewId", node.viewIdResourceName ?: "")
             .put("clickable", node.isClickable).put("enabled", node.isEnabled)
+            .put("checkable", node.isCheckable).put("checked", node.isChecked)
+            .put("stateDescription", node.stateDescription?.toString() ?: "")
             .put("editable", node.isEditable)
             .put("bounds", JSONObject().put("left", bounds.left).put("top", bounds.top)
                 .put("right", bounds.right).put("bottom", bounds.bottom))
@@ -551,6 +573,20 @@ class OrbAccessibilityService : AccessibilityService() {
             overlay?.react(OrbReaction.TAP)
             replyOK(webSocket, id, JSONObject().put("done", true))
         } else replyError(webSocket, id, "field rejected text input")
+    }
+
+    private fun openWirelessDebuggingSettings(webSocket: WebSocket, id: String) {
+        val intent = Intent("android.settings.WIRELESS_DEBUGGING_SETTINGS")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { startActivity(intent) }
+            .recoverCatching {
+                startActivity(
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            .onSuccess { replyOK(webSocket, id, JSONObject().put("opened", true)) }
+            .onFailure { replyError(webSocket, id, it.message ?: "wireless debugging settings unavailable") }
     }
 
     private fun pressKey(webSocket: WebSocket, id: String, key: String, apiControl: Boolean) {

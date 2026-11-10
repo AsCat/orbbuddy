@@ -62,7 +62,7 @@ sudo certbot renew --dry-run
 
 ## 3. 接入与验收
 
-在 Android App 填入 `wss://example.com/device?id=primary` 和设备令牌，启用无障碍服务并开启测试会话。电脑端 MCP URL 为 `https://example.com/mcp`，使用另一枚 MCP 令牌。首页 `https://example.com/` 提供说明和手机临时口令的只读网页查看器。
+在 Android App 填入 `wss://example.com/device`、设备 ID `primary` 和设备令牌，启用无障碍服务并开启测试会话。第二台手机填写相同 relay 地址及另一设备 ID，例如 `samsung`；当前单用户部署会共用设备令牌，不适合给互不信任的用户共用。电脑端 MCP URL 为 `https://example.com/mcp`，使用另一枚 MCP 令牌。首页 `https://example.com/` 提供说明和手机临时口令的只读网页查看器。
 
 ```bash
 curl -fsS https://example.com/health

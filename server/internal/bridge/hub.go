@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -30,11 +31,13 @@ type Response struct {
 }
 
 type DeviceStatus struct {
-	ID          string    `json:"id"`
-	Online      bool      `json:"online"`
-	ConnectedAt time.Time `json:"connectedAt"`
-	LastSeenAt  time.Time `json:"lastSeenAt"`
-	Paused      bool      `json:"paused"`
+	ID           string    `json:"id"`
+	Online       bool      `json:"online"`
+	ConnectedAt  time.Time `json:"connectedAt"`
+	LastSeenAt   time.Time `json:"lastSeenAt"`
+	Paused       bool      `json:"paused"`
+	Manufacturer string    `json:"manufacturer,omitempty"`
+	Model        string    `json:"model,omitempty"`
 }
 
 type Event struct {
@@ -47,16 +50,18 @@ type pendingResult struct {
 }
 
 type device struct {
-	id          string
-	connectedAt time.Time
-	lastSeenAt  time.Time
-	paused      bool
-	conn        *websocket.Conn
-	writeMu     sync.Mutex
-	opMu        sync.Mutex
-	mu          sync.Mutex
-	pending     map[string]chan pendingResult
-	closed      bool
+	id           string
+	connectedAt  time.Time
+	lastSeenAt   time.Time
+	paused       bool
+	manufacturer string
+	model        string
+	conn         *websocket.Conn
+	writeMu      sync.Mutex
+	opMu         sync.Mutex
+	mu           sync.Mutex
+	pending      map[string]chan pendingResult
+	closed       bool
 }
 
 type Hub struct {
@@ -158,19 +163,24 @@ func (h *Hub) Attach(id string, conn *websocket.Conn) {
 		d.lastSeenAt = time.Now().UTC()
 		if response.ID == "__heartbeat__" && response.OK {
 			var heartbeat struct {
-				Paused bool `json:"paused"`
+				Paused       bool   `json:"paused"`
+				Manufacturer string `json:"manufacturer"`
+				Model        string `json:"model"`
 			}
 			if json.Unmarshal(response.Result, &heartbeat) == nil {
 				d.paused = heartbeat.Paused
+				d.manufacturer = heartbeat.Manufacturer
+				d.model = heartbeat.Model
 			}
 		}
 		ch := d.pending[response.ID]
 		delete(d.pending, response.ID)
-		lastSeenAt, paused := d.lastSeenAt, d.paused
+		lastSeenAt, paused, manufacturer, model := d.lastSeenAt, d.paused, d.manufacturer, d.model
 		d.mu.Unlock()
 		h.mu.Lock()
 		if h.devices[id] == d {
-			h.seen[id] = DeviceStatus{ID: id, Online: true, ConnectedAt: d.connectedAt, LastSeenAt: lastSeenAt, Paused: paused}
+			h.seen[id] = DeviceStatus{ID: id, Online: true, ConnectedAt: d.connectedAt, LastSeenAt: lastSeenAt,
+				Paused: paused, Manufacturer: manufacturer, Model: model}
 		}
 		h.mu.Unlock()
 		if ch != nil {
@@ -203,9 +213,13 @@ func (h *Hub) Status() []DeviceStatus {
 		d.mu.Lock()
 		lastSeenAt := d.lastSeenAt
 		paused := d.paused
+		manufacturer := d.manufacturer
+		model := d.model
 		d.mu.Unlock()
-		out = append(out, DeviceStatus{ID: d.id, Online: true, ConnectedAt: d.connectedAt, LastSeenAt: lastSeenAt, Paused: paused})
+		out = append(out, DeviceStatus{ID: d.id, Online: true, ConnectedAt: d.connectedAt, LastSeenAt: lastSeenAt,
+			Paused: paused, Manufacturer: manufacturer, Model: model})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 

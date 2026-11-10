@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,7 +12,13 @@ import (
 )
 
 type deviceInput struct {
-	DeviceID string `json:"deviceId,omitempty" jsonschema:"Device ID, default primary"`
+	DeviceID string `json:"deviceId,omitempty" jsonschema:"Device ID; required when multiple devices are online"`
+}
+
+type screenInput struct {
+	DeviceID     string `json:"deviceId,omitempty" jsonschema:"Device ID; required when multiple devices are online"`
+	IncludeImage *bool  `json:"includeImage,omitempty" jsonschema:"Include a compressed JPEG; defaults to true"`
+	MaxImageEdge int    `json:"maxImageEdge,omitempty" jsonschema:"Longest JPEG edge in pixels, 320 to 1280; defaults to 1280"`
 }
 
 type tapInput struct {
@@ -50,11 +57,17 @@ type appInfoInput struct {
 	PackageName string `json:"packageName"`
 }
 
-func selectedID(id string) string {
-	if id == "" {
-		return "primary"
+func selectedID(devices []bridge.DeviceStatus, id string) (string, error) {
+	if id != "" {
+		return id, nil
 	}
-	return id
+	if len(devices) > 1 {
+		return "", errors.New("multiple devices online; specify deviceId from device_status")
+	}
+	if len(devices) == 1 {
+		return devices[0].ID, nil
+	}
+	return "primary", nil
 }
 
 func toolError(err error) (*mcp.CallToolResult, any, error) {
@@ -62,9 +75,13 @@ func toolError(err error) (*mcp.CallToolResult, any, error) {
 }
 
 func callDevice(ctx context.Context, hub *bridge.Hub, id, method string, params any) (*mcp.CallToolResult, any, error) {
+	selected, err := selectedID(hub.Status(), id)
+	if err != nil {
+		return toolError(err)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	raw, err := hub.Call(ctx, selectedID(id), method, params)
+	raw, err := hub.Call(ctx, selected, method, params)
 	if err != nil {
 		return toolError(err)
 	}
@@ -80,11 +97,22 @@ func NewMCPServer(hub *bridge.Hub) *mcp.Server {
 			b, _ := json.Marshal(hub.Status())
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil, nil
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "get_screen", Description: "Read the current screen as an accessibility tree and JPEG image. Element paths are valid only for the returned revision.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in deviceInput) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(s, &mcp.Tool{Name: "get_screen", Description: "Read the current accessibility tree and optionally a compressed JPEG. Use includeImage=false for cheaper tree-only checks. Element paths are valid only for the returned revision.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in screenInput) (*mcp.CallToolResult, any, error) {
+			selected, err := selectedID(hub.Status(), in.DeviceID)
+			if err != nil {
+				return toolError(err)
+			}
+			params := map[string]any{}
+			if in.IncludeImage != nil {
+				params["includeImage"] = *in.IncludeImage
+			}
+			if in.MaxImageEdge != 0 {
+				params["maxImageEdge"] = in.MaxImageEdge
+			}
 			ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 			defer cancel()
-			raw, err := hub.Call(ctx, selectedID(in.DeviceID), "get_screen", map[string]any{})
+			raw, err := hub.Call(ctx, selected, "get_screen", params)
 			if err != nil {
 				return toolError(err)
 			}
@@ -117,6 +145,10 @@ func NewMCPServer(hub *bridge.Hub) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "get_app_info", Description: "Read package metadata when Android package visibility permits it.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in appInfoInput) (*mcp.CallToolResult, any, error) {
 			return callDevice(ctx, hub, in.DeviceID, "get_app_info", map[string]any{"packageName": in.PackageName})
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "open_wireless_debugging_settings", Description: "Open Android's Wireless debugging settings page. The caller must read the screen before changing the switch."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in deviceInput) (*mcp.CallToolResult, any, error) {
+			return callDevice(ctx, hub, in.DeviceID, "open_wireless_debugging_settings", map[string]any{})
 		})
 	return s
 }

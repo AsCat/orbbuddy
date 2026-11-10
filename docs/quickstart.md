@@ -25,13 +25,13 @@ cd android
 
 安装 `app/build/outputs/apk/debug/app-debug.apk`。GitHub Actions 的 `orbbuddy-debug-apk` 构建产物也可用于首次试装；每次 CI 的调试签名可能不同，不能保证覆盖安装上一轮 CI 包。长期使用请用自己保管的固定签名构建。不要将设备令牌放入 APK 或 Git 仓库。
 
-在手机中打开圆伴，填入 WSS 地址和设备令牌，点击“保存并连接”，再手动启用圆伴无障碍服务。Android 13+ 允许会话通知，并按设备需要调整后台运行设置。小米澎湃 OS 的实机验证还需允许自启动与通知、设置省电策略为“无限制”。会话开启后，前台通知会常驻；停止会话会释放部分唤醒锁。
+在手机中打开圆伴，填入 WSS 地址、唯一设备 ID 和设备令牌，点击“保存并连接”，再手动启用圆伴无障碍服务。单机可用 `primary`；两台手机可设为 `xiaomi` 与 `samsung`，或保留既有小米的 `primary` 并将三星设为 `samsung`。同一 ID 的新连接会替换旧连接。Android 13+ 允许会话通知，并按设备需要调整后台运行设置。小米澎湃 OS 的实机验证还需允许自启动与通知、设置省电策略为“无限制”。会话开启后，前台通知会常驻；停止会话会释放部分唤醒锁。
 
 “显示圆伴卡通悬浮球”默认关闭。打开后可拖动贴边；点击悬浮球可暂停或恢复远程访问、隐藏悬浮球。暂停会拒绝读屏、应用信息查询及所有远程操作，心跳仍保持连接，`device_status` 最多约 25 秒后显示 `paused: true`。如果隐藏了悬浮球，可回到 App 重新打开。悬浮球使用无障碍悬浮层，无需单独的“显示在其他应用上层”授权。
 
 ## 3. 接入智能体
 
-按 [MCP 客户端接入](client-setup.md)配置 HTTPS URL 和 **MCP 令牌**。先调用 `device_status`，确认设备在线且未暂停，再调用 `get_screen`。`get_screen` 应返回界面树和图片；随后才能按当前 `revision` 调用 `tap_element`。
+按 [MCP 客户端接入](client-setup.md)配置 HTTPS URL 和 **MCP 令牌**。先调用 `device_status`，确认目标设备在线且未暂停；多设备时每次工具调用都填 `deviceId`。`get_screen` 默认返回界面树和压缩图片，`includeImage=false` 只返回界面树；随后才能按当前 `revision` 调用 `tap_element`。
 
 ## 验收清单
 
