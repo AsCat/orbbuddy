@@ -2,6 +2,7 @@ package dev.orbbuddy.android
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -19,6 +20,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import android.view.Display
@@ -300,6 +302,8 @@ class OrbAccessibilityService : AccessibilityService() {
                     replyOK(webSocket, id, JSONObject().put("done", true))
                 }
                 "get_screen" -> getScreen(webSocket, id, apiGrantId.ifEmpty { null }, params)
+                "get_lock_state" -> replyOK(webSocket, id, lockState())
+                "wake_screen" -> wakeScreen(webSocket, id)
                 "tap_element" -> tapElement(webSocket, id, params)
                 "tap" -> gesture(webSocket, id, params.getInt("x"), params.getInt("y"), null, null, 60L)
                 "swipe" -> gesture(webSocket, id, params.getInt("x1"), params.getInt("y1"),
@@ -587,6 +591,40 @@ class OrbAccessibilityService : AccessibilityService() {
             }
             .onSuccess { replyOK(webSocket, id, JSONObject().put("opened", true)) }
             .onFailure { replyError(webSocket, id, it.message ?: "wireless debugging settings unavailable") }
+    }
+
+    private fun lockState(): JSONObject {
+        val power = getSystemService(PowerManager::class.java)
+        val keyguard = getSystemService(KeyguardManager::class.java)
+        return JSONObject()
+            .put("interactive", power.isInteractive)
+            .put("keyguardShowing", keyguard.isKeyguardLocked)
+            .put("deviceLocked", keyguard.isDeviceLocked)
+            .put("deviceSecure", keyguard.isDeviceSecure)
+    }
+
+    private fun wakeScreen(webSocket: WebSocket, id: String) {
+        val power = getSystemService(PowerManager::class.java)
+        if (power.isInteractive) {
+            replyOK(webSocket, id, lockState().put("wakeRequested", false))
+            return
+        }
+        try {
+            // A remote accessibility service cannot rely on starting a background Activity.
+            // Keep this deprecated wake flag isolated and time bounded for current Android devices.
+            @Suppress("DEPRECATION")
+            val wakeLock = power.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "OrbBuddy:WakeScreen"
+            )
+            wakeLock.acquire(3_000L)
+            handler.postDelayed({ if (wakeLock.isHeld) wakeLock.release() }, 1_500L)
+            handler.postDelayed({
+                replyOK(webSocket, id, lockState().put("wakeRequested", true))
+            }, 750L)
+        } catch (e: RuntimeException) {
+            replyError(webSocket, id, e.message ?: "screen wake failed")
+        }
     }
 
     private fun pressKey(webSocket: WebSocket, id: String, key: String, apiControl: Boolean) {

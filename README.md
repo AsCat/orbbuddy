@@ -20,6 +20,8 @@ Android 无障碍服务 ── WSS/移动网络 ──> 公网可达的 Go relay
 
 手机断线后自动退避重连。`get_screen` 默认读取当前无障碍节点树及压缩 JPEG；可用 `includeImage=false` 不取图片、`treeMode=compact` 返回精简元素列表，或设置 `maxImageEdge` 为 320–1280 像素。`tap_element` 使用该次读屏返回的 `revision` 与节点 `path`，界面变化后必须重新读屏。截图被 Android 拒绝或安全窗口遮挡时，仍可返回可见的节点树和 `imageError`。
 
+息屏时可先用 `get_lock_state` 查询，再显式调用 `wake_screen` 尝试唤亮显示屏。唤亮不等于解锁：设备仍要求 PIN、图案、密码或生物验证时，用户须在手机上完成系统认证，圆伴不会代输锁屏凭据。当前屏幕唤醒使用限时的旧版 Android wake lock 标志；不同系统可能拒绝，工具会返回实际 `interactive` 状态。[Android 锁屏接口](https://developer.android.com/reference/android/app/KeyguardManager#requestDismissKeyguard(android.app.Activity,%20android.app.KeyguardManager.KeyguardDismissCallback))
+
 ## 本地开发
 
 ```bash
@@ -46,6 +48,8 @@ Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运
 | --- | --- | --- |
 | `device_status` | 无 | 在线设备、型号、连接时间、最后心跳时间及暂停状态 |
 | `get_screen` | `deviceId?`, `includeImage?`, `maxImageEdge?`, `treeMode?` | 完整节点树或精简元素列表、尺寸、修订号、可选 JPEG |
+| `get_lock_state` | `deviceId?` | 屏幕交互状态、锁屏和认证需求 |
+| `wake_screen` | `deviceId?` | 尝试唤亮屏幕并返回锁屏状态，不输入凭据 |
 | `tap_element` | `revision`, `path`, `deviceId?` | 点击结果 |
 | `tap` | `x`, `y`, `deviceId?` | 点击结果 |
 | `swipe` | `x1`, `y1`, `x2`, `y2`, `durationMs`, `deviceId?` | 滑动结果 |

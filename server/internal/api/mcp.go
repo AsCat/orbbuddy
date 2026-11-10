@@ -90,7 +90,7 @@ func callDevice(ctx context.Context, hub *bridge.Hub, id, method string, params 
 }
 
 func NewMCPServer(hub *bridge.Hub) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "orbbuddy", Version: "0.4.3"}, &mcp.ServerOptions{
+	s := mcp.NewServer(&mcp.Implementation{Name: "orbbuddy", Version: "0.4.4"}, &mcp.ServerOptions{
 		Instructions: "OrbBuddy is for Android development testing. Read the screen before element taps and read it again after the UI changes. Ask the user before entering sensitive data or taking a final order, purchase, or payment action; never treat an ordinary tap approval as payment authorization.",
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "device_status", Description: "List connected Android devices.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
@@ -125,6 +125,14 @@ func NewMCPServer(hub *bridge.Hub) *mcp.Server {
 				return toolError(fmt.Errorf("invalid screen response: %w", err))
 			}
 			return &mcp.CallToolResult{Content: content}, nil, nil
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "get_lock_state", Description: "Check whether the display is interactive and whether Android still requires device authentication. Does not capture the screen.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in deviceInput) (*mcp.CallToolResult, any, error) {
+			return callDevice(ctx, hub, in.DeviceID, "get_lock_state", map[string]any{})
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "wake_screen", Description: "Request that Android turn on the display, then report lock state. It does not dismiss a secure lock screen or enter a PIN."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in deviceInput) (*mcp.CallToolResult, any, error) {
+			return callDevice(ctx, hub, in.DeviceID, "wake_screen", map[string]any{})
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "tap_element", Description: "Tap an element path from the latest get_screen result. Fails when the revision is stale."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in tapElementInput) (*mcp.CallToolResult, any, error) {
