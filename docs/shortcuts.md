@@ -28,4 +28,4 @@ python3 tools/orb_adb_connect.py
 
 ## 读屏成本
 
-`get_screen` 默认把截图缩到最长边 1280 像素并以 JPEG 质量 70 编码；不发送原始分辨率图片。只需文字、控件 ID 或开关状态时，传 `includeImage=false`，手机不做截图，MCP 只返回界面树。需要视觉判断时可传 `maxImageEdge=640` 或 `960`；原始手机坐标不受缩图影响。图像进入大模型后如何计费由所用模型与客户端决定，文件字节数和视觉 token 数不是同一个指标。界面树的 JSON 也会占用文本 token；复杂页面可能有数万字符，调用方应避免把反复读取的完整树都送入长期对话。
+`get_screen` 默认把截图缩到最长边 1280 像素并以 JPEG 质量 70 编码；不发送原始分辨率图片。只需文字、控件 ID 或开关状态时，传 `includeImage=false`，手机不做截图；再传 `treeMode="compact"`，MCP 将完整树转换为平铺的 `elements`，只保留文字、描述和可操作控件。`path` 和 `revision` 仍可用于 `tap_element`，`bounds` 是原始像素 `[left,top,right,bottom]`。需要视觉判断时可传 `maxImageEdge=640` 或 `960`；原始手机坐标不受缩图影响。图像进入大模型后如何计费由所用模型与客户端决定，文件字节数和视觉 token 数不是同一个指标。精简树也可能包含屏幕上的敏感文字，调用方应避免把反复读取的结果都送入长期对话。电脑端 `orb-adb` 仍使用完整树，以保持其多层界面定位流程。

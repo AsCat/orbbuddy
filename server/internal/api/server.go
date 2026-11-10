@@ -106,15 +106,24 @@ type screenResult struct {
 	CapturedAt  string          `json:"capturedAt,omitempty"`
 }
 
-func screenContent(raw json.RawMessage) ([]mcp.Content, error) {
+func screenContent(raw json.RawMessage, compact bool) ([]mcp.Content, error) {
 	var screen screenResult
 	if err := json.Unmarshal(raw, &screen); err != nil {
 		return nil, err
 	}
-	meta, _ := json.Marshal(map[string]any{
-		"revision": screen.Revision, "width": screen.Width, "height": screen.Height,
-		"tree": json.RawMessage(screen.Tree), "imageError": screen.ImageError,
-	})
+	var meta []byte
+	if compact {
+		var err error
+		meta, err = compactScreenJSON(screen)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		meta, _ = json.Marshal(map[string]any{
+			"revision": screen.Revision, "width": screen.Width, "height": screen.Height,
+			"tree": json.RawMessage(screen.Tree), "imageError": screen.ImageError,
+		})
+	}
 	content := []mcp.Content{&mcp.TextContent{Text: string(meta)}}
 	if screen.ImageBase64 != "" {
 		image, err := base64.StdEncoding.DecodeString(screen.ImageBase64)

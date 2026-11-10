@@ -9,3 +9,4 @@ This file records changes from the first public preview onward. Until a tagged r
 - Self-hosted deployment examples and an open-source release plan.
 - Local wireless-debugging shortcut with on-device selector memory, and a desktop `orb-adb` command for Xiaomi and Samsung.
 - Multiple trusted phones with explicit device selection, plus tree-only and smaller-image MCP screen reads.
+- Optional compact MCP screen tree with original element paths and bounds to reduce text sent to agents.

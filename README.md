@@ -18,7 +18,7 @@ Android 无障碍服务 ── WSS/移动网络 ──> 公网可达的 Go relay
 
 **使用者必须有自己的公网 IP 吗？**不必。手机和电脑都主动向中转入口发起出站连接；中转入口可部署在已有 VPS、云主机，或由未来的托管服务提供。当前开源版使用全局设备/MCP 令牌，适合一个人自托管，**不支持多个互不信任的用户共用同一实例**。维护者域名是个人实例，不是公共中转服务。详见[部署方式与步骤](docs/self-host.md)。
 
-手机断线后自动退避重连。`get_screen` 默认读取当前无障碍节点树及压缩 JPEG；可用 `includeImage=false` 只取界面树，或设置 `maxImageEdge` 为 320–1280 像素。`tap_element` 使用该次读屏返回的 `revision` 与节点 `path`，界面变化后必须重新读屏。截图被 Android 拒绝或安全窗口遮挡时，仍可返回可见的节点树和 `imageError`。
+手机断线后自动退避重连。`get_screen` 默认读取当前无障碍节点树及压缩 JPEG；可用 `includeImage=false` 不取图片、`treeMode=compact` 返回精简元素列表，或设置 `maxImageEdge` 为 320–1280 像素。`tap_element` 使用该次读屏返回的 `revision` 与节点 `path`，界面变化后必须重新读屏。截图被 Android 拒绝或安全窗口遮挡时，仍可返回可见的节点树和 `imageError`。
 
 ## 本地开发
 
@@ -45,7 +45,7 @@ Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运
 | 工具 | 主要参数 | 结果 |
 | --- | --- | --- |
 | `device_status` | 无 | 在线设备、型号、连接时间、最后心跳时间及暂停状态 |
-| `get_screen` | `deviceId?`, `includeImage?`, `maxImageEdge?` | 节点树、尺寸、修订号、可选 JPEG |
+| `get_screen` | `deviceId?`, `includeImage?`, `maxImageEdge?`, `treeMode?` | 完整节点树或精简元素列表、尺寸、修订号、可选 JPEG |
 | `tap_element` | `revision`, `path`, `deviceId?` | 点击结果 |
 | `tap` | `x`, `y`, `deviceId?` | 点击结果 |
 | `swipe` | `x1`, `y1`, `x2`, `y2`, `durationMs`, `deviceId?` | 滑动结果 |

@@ -31,7 +31,7 @@ cd android
 
 ## 3. 接入智能体
 
-按 [MCP 客户端接入](client-setup.md)配置 HTTPS URL 和 **MCP 令牌**。先调用 `device_status`，确认目标设备在线且未暂停；多设备时每次工具调用都填 `deviceId`。`get_screen` 默认返回界面树和压缩图片，`includeImage=false` 只返回界面树；随后才能按当前 `revision` 调用 `tap_element`。
+按 [MCP 客户端接入](client-setup.md)配置 HTTPS URL 和 **MCP 令牌**。先调用 `device_status`，确认目标设备在线且未暂停；多设备时每次工具调用都填 `deviceId`。`get_screen` 默认返回界面树和压缩图片；省 token 的常用组合是 `includeImage=false`、`treeMode="compact"`，返回可点击元素及文字的平铺列表；随后可按当前 `revision` 和元素 `path` 调用 `tap_element`。
 
 ## 验收清单
 

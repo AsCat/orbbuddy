@@ -19,6 +19,7 @@ type screenInput struct {
 	DeviceID     string `json:"deviceId,omitempty" jsonschema:"Device ID; required when multiple devices are online"`
 	IncludeImage *bool  `json:"includeImage,omitempty" jsonschema:"Include a compressed JPEG; defaults to true"`
 	MaxImageEdge int    `json:"maxImageEdge,omitempty" jsonschema:"Longest JPEG edge in pixels, 320 to 1280; defaults to 1280"`
+	TreeMode     string `json:"treeMode,omitempty" jsonschema:"full (default) or compact; compact returns a flat elements list with original paths and bounds"`
 }
 
 type tapInput struct {
@@ -97,8 +98,11 @@ func NewMCPServer(hub *bridge.Hub) *mcp.Server {
 			b, _ := json.Marshal(hub.Status())
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil, nil
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "get_screen", Description: "Read the current accessibility tree and optionally a compressed JPEG. Use includeImage=false for cheaper tree-only checks. Element paths are valid only for the returned revision.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
+	mcp.AddTool(s, &mcp.Tool{Name: "get_screen", Description: "Read the current UI and optionally a compressed JPEG. For low-cost checks use includeImage=false and treeMode=compact. Compact mode returns flat elements with original paths and bounds. Element paths are valid only for the returned revision.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in screenInput) (*mcp.CallToolResult, any, error) {
+			if in.TreeMode != "" && in.TreeMode != "full" && in.TreeMode != "compact" {
+				return toolError(errors.New("treeMode must be full or compact"))
+			}
 			selected, err := selectedID(hub.Status(), in.DeviceID)
 			if err != nil {
 				return toolError(err)
@@ -116,7 +120,7 @@ func NewMCPServer(hub *bridge.Hub) *mcp.Server {
 			if err != nil {
 				return toolError(err)
 			}
-			content, err := screenContent(raw)
+			content, err := screenContent(raw, in.TreeMode == "compact")
 			if err != nil {
 				return toolError(fmt.Errorf("invalid screen response: %w", err))
 			}

@@ -20,7 +20,7 @@ tool_timeout_sec = 30
 
 若 WorkBuddy 或其他客户端支持远程 Streamable HTTP MCP，可填写相同 URL 和 Bearer 令牌。若客户端只支持 stdio，需要一个本地 stdio 转发适配器；该适配器尚未纳入 MVP。不能仅凭产品名称推断其 MCP 兼容性。
 
-先调用 `device_status`，确认目标设备在线且 `paused` 为 `false`。多台手机在线时，所有读屏和操作工具都要显式传 `deviceId`，例如 `primary` 或 `samsung`；省略时会返回歧义错误。手机端暂停时，所有读屏和操作命令会被拒绝，用户需在手机 App 或悬浮球上恢复。界面树有 `path` 和 `revision`，元素操作优先使用 `tap_element`；修订号过期时重新读屏。只判断文字或控件状态时用 `get_screen` 的 `includeImage=false`；需要视觉判断时才取图片，可设 `maxImageEdge=640` 等较小尺寸。默认仍是最长边 1280 像素、JPEG 质量 70，截图返回为 MCP image 内容块。
+先调用 `device_status`，确认目标设备在线且 `paused` 为 `false`。多台手机在线时，所有读屏和操作工具都要显式传 `deviceId`，例如 `primary` 或 `samsung`；省略时会返回歧义错误。手机端暂停时，所有读屏和操作命令会被拒绝，用户需在手机 App 或悬浮球上恢复。界面树有 `path` 和 `revision`，元素操作优先使用 `tap_element`；修订号过期时重新读屏。只判断文字或控件状态时用 `get_screen` 的 `includeImage=false` 和 `treeMode="compact"`；精简结果返回 `elements` 平铺列表，每项的 `path` 仍可传给 `tap_element`，`bounds` 为原始像素 `[left,top,right,bottom]`。需要视觉判断时才取图片，可设 `maxImageEdge=640` 等较小尺寸。默认仍是完整界面树和最长边 1280 像素、JPEG 质量 70 的图片。
 
 ## 无线调试与圆伴的关系
 
