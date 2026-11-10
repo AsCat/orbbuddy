@@ -24,6 +24,8 @@ tool_timeout_sec = 30
 
 屏幕没有节点时先调用 `get_lock_state`。若 `interactive=false`，可显式调用 `wake_screen`，再查看返回的 `interactive` 与 `deviceLocked`；设备需要系统认证时请让用户在手机上解锁，再重试读屏。`wake_screen` 只请求唤亮，不输入 PIN，也不保证各厂商系统都会响应。它属于操作工具；`get_lock_state` 是只读工具。
 
+在已解锁且屏幕已亮时，可调用 `keep_screen_on`，例如 `{"deviceId":"samsung","minutes":10}`，避免测试中自动熄屏和随后的锁定。最长 30 分钟，到期自动结束；`get_lock_state` 返回 `keepAwakeRemainingMs`。调用 `stop_keep_screen_on`、手机通知的“结束亮屏”、暂停圆伴或断开会话均可结束。此操作不修改系统的全局屏幕超时设置；按电源键手动锁屏仍有效。显示屏 wake lock 是旧版 Android API，需按设备验证。
+
 ## 无线调试与圆伴的关系
 
 圆伴运行时不依赖无线 ADB：手机用移动网络也可主动连接 relay。无线 ADB 只用于开发时安装、调试 APK。`open_wireless_debugging_settings` 尝试打开系统设置；是否已开启须继续读屏确认。手机本地悬浮球的小米快捷流程和电脑端 `orb-adb` 的小米、三星恢复方式见[快捷操作与多设备](shortcuts.md)。圆伴离线时电脑端命令无法靠它打开设置。

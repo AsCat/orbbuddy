@@ -293,11 +293,16 @@ class MainActivity : Activity() {
         val paused = prefs.getBoolean("paused", false)
         pauseButton.isEnabled = enabled
         pauseButton.text = if (paused) "继续远程访问" else "暂停远程访问"
+        val keepAwakeUntil = prefs.getLong("keep_awake_until", 0L)
+        val keepAwakeNotice = if (keepAwakeUntil > System.currentTimeMillis()) {
+            "临时保持亮屏中，剩余约 ${((keepAwakeUntil - System.currentTimeMillis()) / 60_000L + 1)} 分钟；暂停远程访问或点通知中的结束亮屏可立即停止。"
+        } else ""
         status.text = if (enabled) {
             val unrestricted = (getSystemService(POWER_SERVICE) as PowerManager)
                 .isIgnoringBatteryOptimizations(packageName)
             "设备 ${configuredDeviceID(prefs)} · 测试会话已开启。连接状态：${if (paused) "已暂停" else prefs.getString("status", "等待无障碍服务")}。" +
-                if (unrestricted) "后台省电限制已关闭" else "若锁屏后断线，请在后台连接设置中允许持续运行"
+                (if (unrestricted) "后台省电限制已关闭" else "若锁屏后断线，请在后台连接设置中允许持续运行") +
+                (if (keepAwakeNotice.isNotEmpty()) "\n$keepAwakeNotice" else "")
         } else "测试会话已停止"
         val activeCode = PairingCode.active(this)
         pairStatus.text = if (activeCode != null) {

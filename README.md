@@ -22,6 +22,8 @@ Android 无障碍服务 ── WSS/移动网络 ──> 公网可达的 Go relay
 
 息屏时可先用 `get_lock_state` 查询，再显式调用 `wake_screen` 尝试唤亮显示屏。唤亮不等于解锁：设备仍要求 PIN、图案、密码或生物验证时，用户须在手机上完成系统认证，圆伴不会代输锁屏凭据。当前屏幕唤醒使用限时的旧版 Android wake lock 标志；不同系统可能拒绝，工具会返回实际 `interactive` 状态。[Android 锁屏接口](https://developer.android.com/reference/android/app/KeyguardManager#requestDismissKeyguard(android.app.Activity,%20android.app.KeyguardManager.KeyguardDismissCallback))
 
+开发测试时可显式调用 `keep_screen_on`，在已解锁且屏幕已亮的手机上临时阻止自动熄屏；默认 10 分钟，最长 30 分钟。`get_lock_state.keepAwakeRemainingMs` 可查看剩余时间，`stop_keep_screen_on` 或手机通知的“结束亮屏”可立即停止。圆伴暂停、断线或测试会话结束时也会释放；按电源键手动锁屏仍优先于此功能。它使用已弃用但适合当前后台测试场景的 Android 显示屏 wake lock，可能受厂商系统限制，不应当作永久不锁屏设置。[Android 亮屏指南](https://developer.android.com/develop/background-work/background-tasks/awake/screen-on)、[PowerManager 文档](https://developer.android.com/reference/android/os/PowerManager#SCREEN_BRIGHT_WAKE_LOCK)
+
 ## 本地开发
 
 ```bash
@@ -50,6 +52,8 @@ Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运
 | `get_screen` | `deviceId?`, `includeImage?`, `maxImageEdge?`, `treeMode?` | 完整节点树或精简元素列表、尺寸、修订号、可选 JPEG |
 | `get_lock_state` | `deviceId?` | 屏幕交互状态、锁屏和认证需求 |
 | `wake_screen` | `deviceId?` | 尝试唤亮屏幕并返回锁屏状态，不输入凭据 |
+| `keep_screen_on` | `deviceId?`, `minutes?` | 已解锁时临时保持亮屏，1–30 分钟，默认 10 分钟 |
+| `stop_keep_screen_on` | `deviceId?` | 提前结束临时保持亮屏 |
 | `tap_element` | `revision`, `path`, `deviceId?` | 点击结果 |
 | `tap` | `x`, `y`, `deviceId?` | 点击结果 |
 | `swipe` | `x1`, `y1`, `x2`, `y2`, `durationMs`, `deviceId?` | 滑动结果 |

@@ -47,6 +47,7 @@ class OrbAccessibilityService : AccessibilityService() {
         const val ACTION_ORB_CHANGED = "dev.orbbuddy.android.ORB_CHANGED"
         const val ACTION_STATE_CHANGED = "dev.orbbuddy.android.STATE_CHANGED"
         const val ACTION_LOCAL_REVOKE = "dev.orbbuddy.android.LOCAL_REVOKE"
+        const val ACTION_STOP_KEEP_AWAKE = "dev.orbbuddy.android.STOP_KEEP_AWAKE"
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -62,9 +63,18 @@ class OrbAccessibilityService : AccessibilityService() {
     private var destroyed = false
     private var overlay: OrbOverlay? = null
     private var wirelessShortcut: WirelessDebugShortcut? = null
+    private var keepAwakeLock: PowerManager.WakeLock? = null
+    private var keepAwakeUntil = 0L
+    private val keepAwakeExpiry = Runnable { stopKeepAwake() }
 
     private val watchdog = object : Runnable {
         override fun run() {
+            if (keepAwakeLock != null &&
+                (keepAwakeLock?.isHeld != true ||
+                    !getSystemService(PowerManager::class.java).isInteractive ||
+                    getSystemService(KeyguardManager::class.java).isDeviceLocked)) {
+                stopKeepAwake()
+            }
             if (prefs().getBoolean("enabled", false) && socket != null &&
                 SystemClock.elapsedRealtime() - lastServerMessageAt > 75_000L) {
                 Log.w("OrbBuddy", "server heartbeat missing; reconnecting")
@@ -96,17 +106,20 @@ class OrbAccessibilityService : AccessibilityService() {
                 notifyStateChanged()
                 refreshSessionNotification()
             }
+            if (intent?.action == ACTION_STOP_KEEP_AWAKE) stopKeepAwake()
         }
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        prefs().edit().remove("keep_awake_until").apply()
         Log.i("OrbBuddy", "accessibility service connected")
         if (!receiverRegistered) {
             val filter = IntentFilter().apply {
                 addAction(ACTION_RELOAD)
                 addAction(ACTION_ORB_CHANGED)
                 addAction(ACTION_LOCAL_REVOKE)
+                addAction(ACTION_STOP_KEEP_AWAKE)
             }
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(reloadReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -167,6 +180,7 @@ class OrbAccessibilityService : AccessibilityService() {
         socket = null
         overlay?.destroy()
         overlay = null
+        stopKeepAwake()
         wirelessShortcut?.cancel()
         wirelessShortcut = null
         if (receiverRegistered) unregisterReceiver(reloadReceiver)
@@ -195,6 +209,7 @@ class OrbAccessibilityService : AccessibilityService() {
 
     private fun syncOverlay() {
         val settings = prefs()
+        if (settings.getBoolean("paused", false) || !settings.getBoolean("enabled", false)) stopKeepAwake()
         overlay?.sync(
             settings.getBoolean("enabled", false) && settings.getBoolean("orb_enabled", false),
             settings.getBoolean("paused", false),
@@ -207,6 +222,7 @@ class OrbAccessibilityService : AccessibilityService() {
 
     private fun reconnect() {
         if (destroyed) return
+        stopKeepAwake()
         socket?.close(1000, "reconfigure")
         socket = null
         val prefs = prefs()
@@ -261,6 +277,7 @@ class OrbAccessibilityService : AccessibilityService() {
 
     private fun scheduleReconnect(webSocket: WebSocket) {
         if (destroyed || socket !== webSocket || !prefs().getBoolean("enabled", false)) return
+        stopKeepAwake()
         setStatus("断线，重连中")
         val delay = reconnectDelayMs
         reconnectDelayMs = min(reconnectDelayMs * 2, 30_000L)
@@ -304,6 +321,11 @@ class OrbAccessibilityService : AccessibilityService() {
                 "get_screen" -> getScreen(webSocket, id, apiGrantId.ifEmpty { null }, params)
                 "get_lock_state" -> replyOK(webSocket, id, lockState())
                 "wake_screen" -> wakeScreen(webSocket, id)
+                "keep_screen_on" -> keepScreenOn(webSocket, id, params.optInt("minutes", 10))
+                "stop_keep_screen_on" -> {
+                    stopKeepAwake()
+                    replyOK(webSocket, id, lockState())
+                }
                 "tap_element" -> tapElement(webSocket, id, params)
                 "tap" -> gesture(webSocket, id, params.getInt("x"), params.getInt("y"), null, null, 60L)
                 "swipe" -> gesture(webSocket, id, params.getInt("x1"), params.getInt("y1"),
@@ -601,6 +623,57 @@ class OrbAccessibilityService : AccessibilityService() {
             .put("keyguardShowing", keyguard.isKeyguardLocked)
             .put("deviceLocked", keyguard.isDeviceLocked)
             .put("deviceSecure", keyguard.isDeviceSecure)
+            .put("keepAwakeRemainingMs", keepAwakeRemainingMs())
+    }
+
+    private fun keepAwakeRemainingMs(): Long {
+        if (keepAwakeLock?.isHeld != true) {
+            if (keepAwakeLock != null) stopKeepAwake()
+            return 0L
+        }
+        return (keepAwakeUntil - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+    }
+
+    private fun keepScreenOn(webSocket: WebSocket, id: String, minutes: Int) {
+        if (minutes !in 1..30) {
+            replyError(webSocket, id, "minutes must be 1..30")
+            return
+        }
+        val power = getSystemService(PowerManager::class.java)
+        val keyguard = getSystemService(KeyguardManager::class.java)
+        if (!power.isInteractive || keyguard.isDeviceLocked) {
+            replyError(webSocket, id, "wake and unlock the phone before keeping the screen on")
+            return
+        }
+        stopKeepAwake()
+        try {
+            @Suppress("DEPRECATION")
+            val wakeLock = power.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "OrbBuddy:KeepScreenOn")
+            val durationMs = minutes * 60_000L
+            wakeLock.acquire(durationMs)
+            keepAwakeLock = wakeLock
+            keepAwakeUntil = SystemClock.elapsedRealtime() + durationMs
+            prefs().edit().putLong("keep_awake_until", System.currentTimeMillis() + durationMs).apply()
+            handler.postDelayed(keepAwakeExpiry, durationMs)
+            refreshSessionNotification()
+            notifyStateChanged()
+            replyOK(webSocket, id, lockState())
+        } catch (e: RuntimeException) {
+            stopKeepAwake()
+            replyError(webSocket, id, e.message ?: "keep screen on failed")
+        }
+    }
+
+    private fun stopKeepAwake() {
+        handler.removeCallbacks(keepAwakeExpiry)
+        keepAwakeLock?.let { if (it.isHeld) it.release() }
+        keepAwakeLock = null
+        keepAwakeUntil = 0L
+        if (prefs().contains("keep_awake_until")) {
+            prefs().edit().remove("keep_awake_until").apply()
+            refreshSessionNotification()
+            notifyStateChanged()
+        }
     }
 
     private fun wakeScreen(webSocket: WebSocket, id: String) {

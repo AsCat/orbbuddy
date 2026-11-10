@@ -62,13 +62,24 @@ class SessionService : Service() {
         val apiActive = prefs.getBoolean("api_auth_active", false) &&
             System.currentTimeMillis() < prefs.getLong("api_auth_expires_at", 0L) &&
             System.currentTimeMillis() - prefs.getLong("api_last_used_at", 0L) < 5 * 60_000L
-        return Notification.Builder(this, channelId)
+        val keepAwake = prefs.getLong("keep_awake_until", 0L) > System.currentTimeMillis()
+        val builder = Notification.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle(if (apiActive) "圆伴 HTTPS 远程访问中" else "圆伴测试会话已开启")
-            .setContentText(if (apiActive) "点击打开圆伴，可立即撤销授权" else "后台保持连接会增加耗电；点击可停止会话")
+            .setContentTitle(if (keepAwake) "圆伴临时保持亮屏" else if (apiActive) "圆伴 HTTPS 远程访问中" else "圆伴测试会话已开启")
+            .setContentText(if (keepAwake) "最长 30 分钟自动结束；点击打开圆伴，或点操作立即结束" else if (apiActive) "点击打开圆伴，可立即撤销授权" else "后台保持连接会增加耗电；点击可停止会话")
             .setContentIntent(openApp)
             .setOngoing(true)
-            .build()
+        if (keepAwake) {
+            val stop = PendingIntent.getBroadcast(
+                this, 1,
+                Intent(OrbAccessibilityService.ACTION_STOP_KEEP_AWAKE).setPackage(packageName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(Notification.Action.Builder(
+                android.R.drawable.ic_menu_close_clear_cancel, "结束亮屏", stop
+            ).build())
+        }
+        return builder.build()
     }
 
     override fun onDestroy() {

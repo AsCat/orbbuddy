@@ -22,6 +22,11 @@ type screenInput struct {
 	TreeMode     string `json:"treeMode,omitempty" jsonschema:"full (default) or compact; compact returns a flat elements list with original paths and bounds"`
 }
 
+type keepScreenOnInput struct {
+	DeviceID string `json:"deviceId,omitempty" jsonschema:"Device ID; required when multiple devices are online"`
+	Minutes  int    `json:"minutes,omitempty" jsonschema:"Keep the display on for 1 to 30 minutes; default 10"`
+}
+
 type tapInput struct {
 	DeviceID string `json:"deviceId,omitempty"`
 	X        int    `json:"x"`
@@ -90,7 +95,7 @@ func callDevice(ctx context.Context, hub *bridge.Hub, id, method string, params 
 }
 
 func NewMCPServer(hub *bridge.Hub) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "orbbuddy", Version: "0.4.4"}, &mcp.ServerOptions{
+	s := mcp.NewServer(&mcp.Implementation{Name: "orbbuddy", Version: "0.4.5"}, &mcp.ServerOptions{
 		Instructions: "OrbBuddy is for Android development testing. Read the screen before element taps and read it again after the UI changes. Ask the user before entering sensitive data or taking a final order, purchase, or payment action; never treat an ordinary tap approval as payment authorization.",
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "device_status", Description: "List connected Android devices.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
@@ -133,6 +138,18 @@ func NewMCPServer(hub *bridge.Hub) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "wake_screen", Description: "Request that Android turn on the display, then report lock state. It does not dismiss a secure lock screen or enter a PIN."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in deviceInput) (*mcp.CallToolResult, any, error) {
 			return callDevice(ctx, hub, in.DeviceID, "wake_screen", map[string]any{})
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "keep_screen_on", Description: "Temporarily prevent automatic screen timeout during an unlocked Android test session, for at most 30 minutes. Stops on pause or disconnect. Does not defeat manual locking."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in keepScreenOnInput) (*mcp.CallToolResult, any, error) {
+			minutes := in.Minutes
+			if minutes == 0 {
+				minutes = 10
+			}
+			return callDevice(ctx, hub, in.DeviceID, "keep_screen_on", map[string]any{"minutes": minutes})
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "stop_keep_screen_on", Description: "End the temporary keep-screen-on session immediately."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in deviceInput) (*mcp.CallToolResult, any, error) {
+			return callDevice(ctx, hub, in.DeviceID, "stop_keep_screen_on", map[string]any{})
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "tap_element", Description: "Tap an element path from the latest get_screen result. Fails when the revision is stale."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in tapElementInput) (*mcp.CallToolResult, any, error) {

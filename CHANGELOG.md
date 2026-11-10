@@ -11,3 +11,4 @@ This file records changes from the first public preview onward. Until a tagged r
 - Multiple trusted phones with explicit device selection, plus tree-only and smaller-image MCP screen reads.
 - Optional compact MCP screen tree with original element paths and bounds to reduce text sent to agents.
 - Explicit lock-state query and bounded screen-wake request; secure device authentication remains on the phone.
+- Explicit temporary keep-screen-on testing session, with a 30-minute cap and local notification stop action.
