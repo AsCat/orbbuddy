@@ -31,9 +31,14 @@ type Response struct {
 
 type DeviceStatus struct {
 	ID          string    `json:"id"`
+	Online      bool      `json:"online"`
 	ConnectedAt time.Time `json:"connectedAt"`
 	LastSeenAt  time.Time `json:"lastSeenAt"`
 	Paused      bool      `json:"paused"`
+}
+
+type Event struct {
+	Name string `json:"event"`
 }
 
 type pendingResult struct {
@@ -57,9 +62,19 @@ type device struct {
 type Hub struct {
 	mu      sync.RWMutex
 	devices map[string]*device
+	seen    map[string]DeviceStatus
+	onEvent func(string, Event)
 }
 
-func NewHub() *Hub { return &Hub{devices: make(map[string]*device)} }
+func NewHub() *Hub {
+	return &Hub{devices: make(map[string]*device), seen: make(map[string]DeviceStatus)}
+}
+
+func (h *Hub) SetEventHandler(handler func(string, Event)) {
+	h.mu.Lock()
+	h.onEvent = handler
+	h.mu.Unlock()
+}
 
 // Attach replaces an older connection for the same device. It blocks until the
 // socket closes, so the HTTP upgrade handler owns the connection lifecycle.
@@ -69,6 +84,7 @@ func (h *Hub) Attach(id string, conn *websocket.Conn) {
 	h.mu.Lock()
 	old := h.devices[id]
 	h.devices[id] = d
+	h.seen[id] = DeviceStatus{ID: id, Online: true, ConnectedAt: now, LastSeenAt: now}
 	h.mu.Unlock()
 	log.Printf("device %s connected", id)
 	if old != nil {
@@ -79,6 +95,9 @@ func (h *Hub) Attach(id string, conn *websocket.Conn) {
 		h.mu.Lock()
 		if h.devices[id] == d {
 			delete(h.devices, id)
+			status := h.seen[id]
+			status.Online = false
+			h.seen[id] = status
 		}
 		h.mu.Unlock()
 		log.Printf("device %s disconnected", id)
@@ -120,6 +139,17 @@ func (h *Hub) Attach(id string, conn *websocket.Conn) {
 			return
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
+		var event Event
+		if json.Unmarshal(data, &event) == nil && event.Name != "" {
+			h.mu.RLock()
+			current := h.devices[id] == d
+			handler := h.onEvent
+			h.mu.RUnlock()
+			if current && handler != nil {
+				handler(id, event)
+			}
+			continue
+		}
 		var response Response
 		if json.Unmarshal(data, &response) != nil || response.ID == "" {
 			continue
@@ -136,7 +166,13 @@ func (h *Hub) Attach(id string, conn *websocket.Conn) {
 		}
 		ch := d.pending[response.ID]
 		delete(d.pending, response.ID)
+		lastSeenAt, paused := d.lastSeenAt, d.paused
 		d.mu.Unlock()
+		h.mu.Lock()
+		if h.devices[id] == d {
+			h.seen[id] = DeviceStatus{ID: id, Online: true, ConnectedAt: d.connectedAt, LastSeenAt: lastSeenAt, Paused: paused}
+		}
+		h.mu.Unlock()
 		if ch != nil {
 			ch <- pendingResult{response: response}
 		}
@@ -168,9 +204,17 @@ func (h *Hub) Status() []DeviceStatus {
 		lastSeenAt := d.lastSeenAt
 		paused := d.paused
 		d.mu.Unlock()
-		out = append(out, DeviceStatus{ID: d.id, ConnectedAt: d.connectedAt, LastSeenAt: lastSeenAt, Paused: paused})
+		out = append(out, DeviceStatus{ID: d.id, Online: true, ConnectedAt: d.connectedAt, LastSeenAt: lastSeenAt, Paused: paused})
 	}
 	return out
+}
+
+// LookupStatus retains only connectivity metadata after a device disconnects.
+func (h *Hub) LookupStatus(id string) (DeviceStatus, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	status, ok := h.seen[id]
+	return status, ok
 }
 
 func (h *Hub) Call(ctx context.Context, deviceID, method string, params any) (json.RawMessage, error) {

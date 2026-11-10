@@ -21,6 +21,7 @@ class SessionService : Service() {
     private val renewWakeLock = object : Runnable {
         override fun run() {
             wakeLock?.acquire(10 * 60 * 1000L)
+            getSystemService(NotificationManager::class.java).notify(1, buildNotification())
             handler.postDelayed(this, 5 * 60 * 1000L)
         }
     }
@@ -36,17 +37,7 @@ class SessionService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(channelId, "圆伴测试会话", NotificationManager.IMPORTANCE_LOW)
         )
-        val openApp = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val notification = Notification.Builder(this, channelId)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("圆伴测试会话已开启")
-            .setContentText("后台保持连接会增加耗电；点击可停止会话")
-            .setContentIntent(openApp)
-            .setOngoing(true)
-            .build()
+        val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
@@ -60,6 +51,24 @@ class SessionService : Service() {
         handler.removeCallbacks(renewWakeLock)
         handler.post(renewWakeLock)
         return START_STICKY
+    }
+
+    private fun buildNotification(): Notification {
+        val openApp = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val prefs = getSharedPreferences("connection", MODE_PRIVATE)
+        val apiActive = prefs.getBoolean("api_auth_active", false) &&
+            System.currentTimeMillis() < prefs.getLong("api_auth_expires_at", 0L) &&
+            System.currentTimeMillis() - prefs.getLong("api_last_used_at", 0L) < 5 * 60_000L
+        return Notification.Builder(this, channelId)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle(if (apiActive) "圆伴 HTTPS 远程访问中" else "圆伴测试会话已开启")
+            .setContentText(if (apiActive) "点击打开圆伴，可立即撤销授权" else "后台保持连接会增加耗电；点击可停止会话")
+            .setContentIntent(openApp)
+            .setOngoing(true)
+            .build()
     }
 
     override fun onDestroy() {

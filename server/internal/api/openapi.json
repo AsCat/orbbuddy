@@ -1,0 +1,76 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OrbBuddy HTTPS API",
+    "version": "0.3.0",
+    "description": "手机主动连接 WSS relay；HTTPS 会话需在手机端生成一次性口令。原有 /mcp 和 /device 协议不变。"
+  },
+  "servers": [{"url": "https://orb.yuanxuyinli.com"}],
+  "components": {
+    "securitySchemes": {
+      "SessionBearer": {"type": "http", "scheme": "bearer", "bearerFormat": "opaque"}
+    },
+    "parameters": {
+      "DeviceId": {"name": "deviceId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
+      "RequestId": {"name": "requestId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,80}$"}}
+    },
+    "schemas": {
+      "Error": {"type": "object", "required": ["error"], "properties": {"error": {"type": "object", "required": ["code", "message"], "properties": {"code": {"type": "string"}, "message": {"type": "string"}}}}},
+      "PairRequest": {"type": "object", "required": ["device_id", "code"], "additionalProperties": false, "properties": {"device_id": {"type": "string"}, "code": {"type": "string", "pattern": "^[0-9]{4}$"}}},
+      "PairResponse": {"type": "object", "required": ["access_token", "token_type", "scope", "device_id", "expires_at", "idle_timeout_seconds"], "properties": {"access_token": {"type": "string"}, "token_type": {"type": "string", "enum": ["Bearer"]}, "scope": {"type": "string", "enum": ["viewer", "controller"]}, "device_id": {"type": "string"}, "allowed_package": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "idle_timeout_seconds": {"type": "integer", "example": 300}}},
+      "Status": {"type": "object", "required": ["device_id", "online", "last_seen_at", "paused", "screen_capture_available", "control_available", "last_capture_at"], "properties": {"device_id": {"type": "string"}, "online": {"type": "boolean"}, "last_seen_at": {"type": "string", "format": "date-time"}, "paused": {"type": "boolean"}, "screen_capture_available": {"type": "boolean", "description": "设备在线且未暂停；不保证安全窗口允许截屏"}, "control_available": {"type": "boolean", "description": "还需手机前台位于授权的可调试 App"}, "last_capture_at": {"type": "string", "format": "date-time", "nullable": true}}},
+      "CaptureMeta": {"type": "object", "required": ["device_id", "online", "has_capture"], "properties": {"device_id": {"type": "string"}, "online": {"type": "boolean"}, "has_capture": {"type": "boolean"}, "captured_at": {"type": "string", "format": "date-time"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "revision": {"type": "integer"}, "age_ms": {"type": "integer"}, "fresh": {"type": "boolean"}}},
+      "ActionRequest": {"type": "object", "required": ["request_id", "action"], "additionalProperties": false, "properties": {"request_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,80}$"}, "action": {"type": "string", "enum": ["tap", "swipe", "back", "home"]}, "params": {"type": "object", "description": "tap: x,y; swipe: x1,y1,x2,y2,duration_ms; back/home: omit or empty object"}}},
+      "Operation": {"type": "object", "required": ["request_id", "status"], "properties": {"request_id": {"type": "string"}, "status": {"type": "string", "enum": ["accepted", "executed", "failed"]}, "result": {"type": "object"}, "error": {"type": "string"}}}
+    },
+    "responses": {
+      "Error": {"description": "错误 JSON，常见状态码：401、403、404、409、429、503、504", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+    }
+  },
+  "paths": {
+    "/api/v1/auth/pair": {
+      "post": {
+        "summary": "使用手机端一次性四位码创建短期会话",
+        "description": "口令 60 秒有效且只使用一次；连续错误 3 次冷却 5 分钟。viewer 和 controller 由手机端生成口令时决定。",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairRequest"}}}},
+        "responses": {"200": {"description": "配对成功", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairResponse"}}}}, "401": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}, "503": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/api/v1/auth/revoke": {
+      "post": {"summary": "撤销当前设备的所有 HTTPS 会话", "security": [{"SessionBearer": []}], "responses": {"200": {"description": "已撤销"}, "401": {"$ref": "#/components/responses/Error"}}}
+    },
+    "/api/v1/devices/{deviceId}/status": {
+      "parameters": [{"$ref": "#/components/parameters/DeviceId"}],
+      "get": {"summary": "设备状态，不延长会话", "security": [{"SessionBearer": []}], "responses": {"200": {"description": "设备状态", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Status"}}}}, "401": {"$ref": "#/components/responses/Error"}, "403": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}}}
+    },
+    "/api/v1/devices/{deviceId}/screenshot": {
+      "parameters": [{"$ref": "#/components/parameters/DeviceId"}],
+      "get": {
+        "summary": "按需读取最新 JPEG 截图",
+        "description": "max_age_ms 可传 0..60000；当前实现始终请求新截图，不使用缓存。",
+        "security": [{"SessionBearer": []}],
+        "parameters": [{"name": "max_age_ms", "in": "query", "schema": {"type": "integer", "minimum": 0, "maximum": 60000}}],
+        "responses": {"200": {"description": "新截图；Cache-Control: no-store", "headers": {"X-Request-ID": {"schema": {"type": "string"}}, "X-Captured-At": {"schema": {"type": "string", "format": "date-time"}}, "X-Screen-Width": {"schema": {"type": "integer"}}, "X-Screen-Height": {"schema": {"type": "integer"}}}, "content": {"image/jpeg": {"schema": {"type": "string", "format": "binary"}}}}, "409": {"$ref": "#/components/responses/Error"}, "503": {"$ref": "#/components/responses/Error"}, "504": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/api/v1/devices/{deviceId}/screenshot/meta": {
+      "parameters": [{"$ref": "#/components/parameters/DeviceId"}],
+      "get": {"summary": "最近一次 HTTPS 截图的元数据", "security": [{"SessionBearer": []}], "responses": {"200": {"description": "元数据；断线或重连后旧图不标为新鲜", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CaptureMeta"}}}}, "401": {"$ref": "#/components/responses/Error"}}}
+    },
+    "/api/v1/devices/{deviceId}/actions": {
+      "parameters": [{"$ref": "#/components/parameters/DeviceId"}],
+      "post": {"summary": "执行有限动作；仅限手机授权的可调试 App", "security": [{"SessionBearer": []}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ActionRequest"}}}}, "responses": {"200": {"description": "执行完成或幂等重放", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Operation"}}}}, "403": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}, "503": {"$ref": "#/components/responses/Error"}, "504": {"$ref": "#/components/responses/Error"}}}
+    },
+    "/api/v1/operations/{requestId}": {
+      "parameters": [{"$ref": "#/components/parameters/RequestId"}],
+      "get": {"summary": "查询本会话中的动作回执，不延长会话", "security": [{"SessionBearer": []}], "responses": {"200": {"description": "动作状态", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Operation"}}}}, "404": {"$ref": "#/components/responses/Error"}}}
+    },
+    "/api/v1/shares": {
+      "post": {"summary": "生成一次性只读截图链接", "description": "最多每会话 5 条，每条有效 60 秒。只生成能力链接，不在服务端缓存截图。", "security": [{"SessionBearer": []}], "responses": {"201": {"description": "分享链接", "content": {"application/json": {"schema": {"type": "object", "properties": {"share_url": {"type": "string", "format": "uri"}, "share_path": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "single_use": {"type": "boolean"}}}}}}, "429": {"$ref": "#/components/responses/Error"}}}
+    },
+    "/share/{token}": {
+      "parameters": [{"name": "token", "in": "path", "required": true, "schema": {"type": "string", "description": "高熵、一次性能力令牌"}}],
+      "get": {"summary": "使用一次性链接读取最新 JPEG 截图", "description": "成功或失败后链接均失效；过期、已使用或原会话撤销时返回 410。", "responses": {"200": {"description": "新截图；Cache-Control: no-store", "content": {"image/jpeg": {"schema": {"type": "string", "format": "binary"}}}}, "410": {"$ref": "#/components/responses/Error"}, "503": {"$ref": "#/components/responses/Error"}}}
+    }
+  }
+}

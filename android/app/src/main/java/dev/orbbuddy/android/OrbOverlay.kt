@@ -28,6 +28,7 @@ import kotlin.math.sin
 class OrbOverlay(
     private val service: OrbAccessibilityService,
     private val onPauseToggle: () -> Unit,
+    private val onAPIRevoke: () -> Unit,
     private val onHide: () -> Unit,
 ) {
     private val manager = service.getSystemService(WindowManager::class.java)
@@ -46,6 +47,7 @@ class OrbOverlay(
     private var captureHidden = false
     private var paused = false
     private var connectionStatus = "连接中"
+    private var apiActive = false
     private var downX = 0f
     private var downY = 0f
     private var startX = 0
@@ -59,17 +61,18 @@ class OrbOverlay(
         }
     }
 
-    fun sync(show: Boolean, paused: Boolean, status: String) {
+    fun sync(show: Boolean, paused: Boolean, status: String, apiActive: Boolean) {
         this.paused = paused
         connectionStatus = status
+        this.apiActive = apiActive
         if (show) show() else hide()
         orb?.apply {
             this.paused = paused
             this.connected = status == "已连接"
-            contentDescription = "圆伴悬浮球，${if (paused) "已暂停" else status}。点击打开会话控制，拖动可移动"
+            contentDescription = "圆伴悬浮球，${if (paused) "已暂停" else if (apiActive) "HTTPS 远程访问中" else status}。点击打开会话控制，拖动可移动"
             invalidate()
         }
-        menuStatus?.text = if (paused) "远程访问已暂停" else "圆伴 · $status"
+        menuStatus?.text = statusLabel()
         pauseAction?.text = if (paused) "继续远程访问" else "暂停远程访问"
     }
 
@@ -89,6 +92,13 @@ class OrbOverlay(
     }
 
     fun destroy() = hide()
+
+    private fun statusLabel() = when {
+        paused && apiActive -> "HTTPS 已授权 · 暂停中"
+        paused -> "远程访问已暂停"
+        apiActive -> "HTTPS 远程访问中"
+        else -> "圆伴 · $connectionStatus"
+    }
 
     private fun show() {
         if (orb != null) return
@@ -184,7 +194,8 @@ class OrbOverlay(
         val screen = displaySize()
         val width = dp(188)
         val x = if (params.x < screen.x / 2) params.x else params.x + size - width
-        val y = if (params.y > dp(158)) params.y - dp(148) else params.y + size + dp(8)
+        val menuHeight = if (apiActive) dp(196) else dp(148)
+        val y = if (params.y > menuHeight + dp(10)) params.y - menuHeight else params.y + size + dp(8)
         val panel = LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(9), dp(14), dp(9))
@@ -195,11 +206,18 @@ class OrbOverlay(
             }
             elevation = dp(8).toFloat()
         }
-        menuStatus = menuLine(if (paused) "远程访问已暂停" else "圆伴 · $connectionStatus", false).also(panel::addView)
+        menuStatus = menuLine(statusLabel(), false).also(panel::addView)
         pauseAction = menuLine(if (paused) "继续远程访问" else "暂停远程访问", true).also {
             it.setOnClickListener {
                 hideMenu()
                 onPauseToggle()
+            }
+            panel.addView(it)
+        }
+        if (apiActive) menuLine("撤销 HTTPS 授权", true).also {
+            it.setOnClickListener {
+                hideMenu()
+                onAPIRevoke()
             }
             panel.addView(it)
         }

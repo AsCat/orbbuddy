@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/subtle"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"log"
@@ -16,6 +17,12 @@ import (
 
 var validDeviceID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
+//go:embed index.html
+var indexHTML string
+
+//go:embed openapi.json
+var openAPIJSON string
+
 type Config struct {
 	DeviceToken string
 	MCPToken    string
@@ -23,6 +30,18 @@ type Config struct {
 
 func NewHandler(hub *bridge.Hub, cfg Config) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write([]byte(indexHTML))
+	})
+	mux.HandleFunc("GET /openapi.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write([]byte(openAPIJSON))
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
@@ -56,6 +75,7 @@ func NewHandler(hub *bridge.Hub, cfg Config) http.Handler {
 		}
 		mcpHandler.ServeHTTP(w, r)
 	}))
+	newHTTPAPI(hub).register(mux)
 	return mux
 }
 
@@ -65,12 +85,13 @@ func bearerMatches(r *http.Request, want string) bool {
 }
 
 type screenResult struct {
-	Revision   int64           `json:"revision"`
-	Width      int             `json:"width"`
-	Height     int             `json:"height"`
-	Tree       json.RawMessage `json:"tree"`
+	Revision    int64           `json:"revision"`
+	Width       int             `json:"width"`
+	Height      int             `json:"height"`
+	Tree        json.RawMessage `json:"tree"`
 	ImageBase64 string          `json:"imageBase64"`
-	ImageError string          `json:"imageError,omitempty"`
+	ImageError  string          `json:"imageError,omitempty"`
+	CapturedAt  string          `json:"capturedAt,omitempty"`
 }
 
 func screenContent(raw json.RawMessage) ([]mcp.Content, error) {

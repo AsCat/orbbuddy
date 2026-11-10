@@ -35,6 +35,8 @@ cd android
 
 ## 验收清单
 
+标准 HTTPS 接口的手机临时授权与调用方式见 [HTTPS API 说明](https-api.md)，或直接打开 https://orb.yuanxuyinli.com/ 。原 MCP 设备令牌与新 HTTPS 临时会话令牌不能混用。
+
 1. 手机保持移动网络，电脑不连接无线 ADB：连续多次调用 `get_screen`，都应返回图片和节点树。
 2. 锁屏 30 分钟后再次读屏；记录响应耗时、`lastSeenAt` 和前台通知状态。
 3. 在 Wi-Fi 与移动网络之间切换，再次读屏；服务器日志应记录重新连接。

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="圆伴 OrbBuddy：Android 远程开发测试的 HTTPS API 与 MCP 接入说明。">
+  <link rel="alternate" type="application/json" title="OpenAPI" href="/openapi.json">
+  <title>圆伴 OrbBuddy · Android 远程开发测试</title>
+  <style>
+    :root{--ink:#183644;--muted:#5d7480;--teal:#087b74;--line:#d7e6e7;--bg:#f4faf8}
+    *{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#e5f7f0,var(--bg) 46%,#edf5fa);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    a{color:#08635e;text-underline-offset:3px}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}code{font-size:.92em}
+    .wrap{width:min(1080px,calc(100% - 36px));margin:auto}.top{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:22px 0}.brand{font-size:19px;font-weight:800;text-decoration:none;color:var(--ink)}.mark{display:inline-grid;place-items:center;width:36px;height:36px;background:var(--teal);border-radius:50%;color:#fff;margin-right:8px}.nav{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;font-weight:650}.nav a{text-decoration:none}
+    .hero{display:grid;grid-template-columns:1.7fr .7fr;gap:30px;align-items:center;padding:60px 0 65px}.eyebrow{font-size:13px;font-weight:800;letter-spacing:.1em;color:var(--teal)}h1{font-size:clamp(38px,5vw,62px);line-height:1.14;letter-spacing:-.04em;margin:12px 0 20px}.hero p{font-size:19px;color:var(--muted);max-width:660px}.button{display:inline-block;background:var(--teal);color:white;text-decoration:none;border-radius:12px;padding:12px 18px;margin:8px 10px 0 0;font-weight:700}.button.alt{background:white;color:#08635e;border:1px solid var(--line)}
+    .orb{justify-self:center;width:210px;height:210px;position:relative;border-radius:50%;background:radial-gradient(circle at 36% 27%,#b8f5d9,#46c8a6 48%,#098b82);box-shadow:0 24px 60px #0b8c8340,inset -15px -19px 28px #056d6850}.eye{position:absolute;top:80px;width:13px;height:23px;border-radius:50%;background:#174b53}.eye.left{left:67px}.eye.right{right:67px}.smile{position:absolute;left:82px;top:120px;width:46px;height:25px;border-bottom:5px solid #174b53;border-radius:50%}
+    section{margin:25px 0 52px}h2{font-size:29px;line-height:1.25;letter-spacing:-.025em;margin:0 0 12px}.lead{color:var(--muted);max-width:770px;margin:0 0 20px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.card,.panel{background:white;border:1px solid var(--line);border-radius:17px;padding:22px;box-shadow:0 7px 25px #173b4509}.card h3,.panel h3{margin:0 0 8px}.card p,.panel p{margin:0;color:var(--muted)}.num{font-weight:800;color:var(--teal);font-size:13px}
+    pre{background:#132d3a;color:#e9f7f2;padding:18px 20px;border-radius:14px;overflow:auto;line-height:1.7;font-size:13px}.split{display:grid;grid-template-columns:1fr 1fr;gap:18px}.panel ul{padding-left:20px;margin:8px 0}.panel li{margin:7px 0}.tablewrap{overflow:auto;background:white;border:1px solid var(--line);border-radius:17px}table{border-collapse:collapse;width:100%;min-width:650px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:12px 15px}th{background:#eff8f5;font-size:13px}tr:last-child td{border-bottom:0}.note{border-left:4px solid #ecb75f;background:#fff8eb;border-radius:0 10px 10px 0;padding:13px 17px;margin-top:18px}.footer{border-top:1px solid var(--line);color:var(--muted);font-size:13px;padding:25px 0 40px}
+    @media(max-width:760px){.top{flex-direction:column;align-items:flex-start}.hero{grid-template-columns:1fr;padding:35px 0 40px}.orb{display:none}.grid,.split{grid-template-columns:1fr}.hero p{font-size:17px}h1{font-size:41px}}
+  </style>
+</head>
+<body>
+<header class="wrap top"><a class="brand" href="/"><span class="mark" aria-hidden="true">●</span>圆伴 OrbBuddy</a><nav class="nav" aria-label="页面导航"><a href="#flow">接入流程</a><a href="#quickstart">调用示例</a><a href="#api">接口</a><a href="/openapi.json">OpenAPI</a><a href="https://github.com/AsCat/orbbuddy">源码</a></nav></header>
+<main class="wrap">
+  <div class="hero"><div><div class="eyebrow">ANDROID · WSS RELAY · HTTPS API · MCP</div><h1>让手机画面，<br>按需抵达智能体。</h1><p>手机主动连接自己的中转服务器。获得手机端临时授权后，开发者和智能体可通过 HTTPS 查看当前截图与设备状态，并对指定的可调试 App 执行有限测试操作。</p><a class="button" href="#quickstart">查看使用方式</a><a class="button alt" href="/openapi.json">读取 OpenAPI</a></div><div class="orb" role="img" aria-label="绿色圆伴卡通悬浮球"><span class="eye left"></span><span class="eye right"></span><span class="smile"></span></div></div>
+  <section id="flow"><h2>三步接入</h2><p class="lead">运行时无需无线 ADB，也无需电脑与手机处在同一局域网。</p><div class="grid"><article class="card"><span class="num">01</span><h3>手机连接</h3><p>在圆伴 App 配置 WSS 地址与设备令牌，开启无障碍服务和测试会话。</p></article><article class="card"><span class="num">02</span><h3>手机授权</h3><p>生成 60 秒内有效的一次性 4 位码。选择只读，或指定已安装的可调试 App 授权控制。</p></article><article class="card"><span class="num">03</span><h3>HTTPS 调用</h3><p>以口令换取短期 Bearer 令牌，查询状态、取新截图或执行受限动作。手机可随时撤销。</p></article></div></section>
+  <section id="quickstart"><h2>调用示例</h2><p class="lead">把 <code>0000</code> 换成手机当前显示的口令。口令、令牌和截图不要放入公开日志或 URL。</p>
+<pre><code># 1. 在手机 App 生成口令后配对
+curl -sS -X POST https://orb.yuanxuyinli.com/api/v1/auth/pair -H 'Content-Type: application/json' -d '{"device_id":"primary","code":"0000"}'
+
+# 2. 将响应中的 access_token 保存为 TOKEN
+TOKEN='粘贴 access_token'
+curl -H "Authorization: Bearer $TOKEN" https://orb.yuanxuyinli.com/api/v1/devices/primary/status
+
+# 3. 按需获取最新 JPEG；响应含 X-Captured-At 和 X-Request-ID
+curl -H "Authorization: Bearer $TOKEN" https://orb.yuanxuyinli.com/api/v1/devices/primary/screenshot -o screen.jpg</code></pre>
+<div class="split"><div class="panel"><h3>控制会话</h3><p>仅当手机生成控制口令，且前台是指定的可调试 App 时可以操作：</p><pre><code>curl -X POST https://orb.yuanxuyinli.com/api/v1/devices/primary/actions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"request_id":"tap-001","action":"tap","params":{"x":320,"y":600}}'</code></pre><p>动作仅支持 <code>tap</code>、<code>swipe</code>、<code>back</code>、<code>home</code>。重复请求 ID 不重复执行。执行 Back/Home 后控制暂停，需手机重新授权才能继续。</p></div><div class="panel"><h3>会话边界</h3><ul><li>4 位码一次性使用，60 秒后失效；连续错误 3 次进入冷却。</li><li>会话空闲 5 分钟失效、最长 30 分钟；状态查询不续期。</li><li>手机 App 可立即撤销；也可调用 <code>POST /api/v1/auth/revoke</code>。</li><li>截图不落盘，响应禁止缓存，所有设备接口都需鉴权。</li></ul></div></div></section>
+  <section id="api"><h2>HTTPS API 与 MCP</h2><p class="lead">完整字段与错误结构见 <a href="/openapi.json">OpenAPI 3 契约</a>。原有手机 WSS 协议和 MCP 入口 <code>https://orb.yuanxuyinli.com/mcp</code> 保持可用；MCP 使用独立令牌。</p><div class="tablewrap"><table><thead><tr><th>方法</th><th>路径</th><th>权限</th><th>用途</th></tr></thead><tbody>
+<tr><td>POST</td><td><code>/api/v1/auth/pair</code></td><td>手机临时口令</td><td>换取短期会话</td></tr>
+<tr><td>POST</td><td><code>/api/v1/auth/revoke</code></td><td>会话令牌</td><td>撤销设备 HTTPS 会话</td></tr>
+<tr><td>GET</td><td><code>/api/v1/devices/{deviceId}/status</code></td><td>viewer</td><td>在线、暂停、上次截图时间</td></tr>
+<tr><td>GET</td><td><code>/api/v1/devices/{deviceId}/screenshot</code></td><td>viewer</td><td>按需获取最新 JPEG</td></tr>
+<tr><td>GET</td><td><code>/api/v1/devices/{deviceId}/screenshot/meta</code></td><td>viewer</td><td>截图时间与尺寸</td></tr>
+<tr><td>POST</td><td><code>/api/v1/devices/{deviceId}/actions</code></td><td>controller</td><td>有限动作和执行回执</td></tr>
+<tr><td>GET</td><td><code>/api/v1/operations/{requestId}</code></td><td>controller</td><td>查询操作结果</td></tr>
+<tr><td>POST</td><td><code>/api/v1/shares</code></td><td>viewer</td><td>生成 60 秒内有效的一次性截图链接</td></tr>
+<tr><td>GET</td><td><code>/share/{token}</code></td><td>一次性链接</td><td>读取一张最新截图，使用后失效</td></tr>
+</tbody></table></div><div class="note"><strong>智能体注意：</strong>能打开网页不代表能提交 POST 或 Bearer 请求头。普通网页抓取工具未必能读取受控截图；可先由已授权客户端调用 <code>POST /api/v1/shares</code> 生成单张只读链接，再交给仅能打开 URL 的客户端。完整操作需要支持认证 HTTPS 请求的连接器，或继续使用现有 MCP 接口。</div></section>
+</main>
+<footer class="wrap footer">圆伴 OrbBuddy · 面向 Android 开发测试。生产交易、支付与下单流程不开放 HTTPS 自动控制。<br><a href="https://github.com/AsCat/orbbuddy">GitHub 源码与部署说明</a></footer>
+</body></html>

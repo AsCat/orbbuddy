@@ -33,6 +33,8 @@ import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.security.SecureRandom
+import java.time.Instant
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
@@ -42,6 +44,7 @@ class OrbAccessibilityService : AccessibilityService() {
         const val ACTION_RELOAD = "dev.orbbuddy.android.RELOAD"
         const val ACTION_ORB_CHANGED = "dev.orbbuddy.android.ORB_CHANGED"
         const val ACTION_STATE_CHANGED = "dev.orbbuddy.android.STATE_CHANGED"
+        const val ACTION_LOCAL_REVOKE = "dev.orbbuddy.android.LOCAL_REVOKE"
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -84,6 +87,12 @@ class OrbAccessibilityService : AccessibilityService() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == ACTION_RELOAD) reconnect()
             if (intent?.action == ACTION_ORB_CHANGED) syncOverlay()
+            if (intent?.action == ACTION_LOCAL_REVOKE) {
+                socket?.send(JSONObject().put("event", "auth_revoke").toString())
+                syncOverlay()
+                notifyStateChanged()
+                refreshSessionNotification()
+            }
         }
     }
 
@@ -94,6 +103,7 @@ class OrbAccessibilityService : AccessibilityService() {
             val filter = IntentFilter().apply {
                 addAction(ACTION_RELOAD)
                 addAction(ACTION_ORB_CHANGED)
+                addAction(ACTION_LOCAL_REVOKE)
             }
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(reloadReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -109,6 +119,9 @@ class OrbAccessibilityService : AccessibilityService() {
                 prefs().edit().putBoolean("paused", paused).apply()
                 syncOverlay()
                 notifyStateChanged()
+            }, onAPIRevoke = {
+                clearAPIGrant()
+                socket?.send(JSONObject().put("event", "auth_revoke").toString())
             }, onHide = {
                 prefs().edit().putBoolean("orb_enabled", false).apply()
                 syncOverlay()
@@ -171,7 +184,10 @@ class OrbAccessibilityService : AccessibilityService() {
         overlay?.sync(
             settings.getBoolean("enabled", false) && settings.getBoolean("orb_enabled", false),
             settings.getBoolean("paused", false),
-            settings.getString("status", "连接中") ?: "连接中"
+            settings.getString("status", "连接中") ?: "连接中",
+            settings.getBoolean("api_auth_active", false) &&
+                System.currentTimeMillis() < settings.getLong("api_auth_expires_at", 0L) &&
+                System.currentTimeMillis() - settings.getLong("api_last_used_at", 0L) < 5 * 60_000L
         )
     }
 
@@ -199,6 +215,9 @@ class OrbAccessibilityService : AccessibilityService() {
                     if (socket === webSocket) {
                         reconnectDelayMs = 1000L
                         lastServerMessageAt = SystemClock.elapsedRealtime()
+                        // HTTP API grants belong to one relay connection.
+                        prefs().edit().putBoolean("api_auth_active", false).remove("api_grant_id").apply()
+                        refreshSessionNotification()
                         Log.i("OrbBuddy", "device socket connected")
                         setStatus("已连接")
                     }
@@ -240,19 +259,39 @@ class OrbAccessibilityService : AccessibilityService() {
             val command = JSONObject(text)
             id = command.getString("id")
             val params = command.optJSONObject("params") ?: JSONObject()
-            if (command.getString("method") != "heartbeat" && prefs().getBoolean("paused", false)) {
+            val method = command.getString("method")
+            if (method != "heartbeat" && method != "auth_revoke" && method != "auth_lockout" && prefs().getBoolean("paused", false)) {
                 replyError(webSocket, id, "remote access is paused on the phone")
                 return
             }
-            when (command.getString("method")) {
+            val apiGrantId = params.optString("apiGrantId", "")
+            if (apiGrantId.isNotEmpty() && !validAPIGrant(apiGrantId)) {
+                replyError(webSocket, id, "remote API authorization revoked")
+                return
+            }
+            if (apiGrantId.isNotEmpty() && method in listOf("tap", "swipe", "press_key") && !controlPackageAllowed()) {
+                replyError(webSocket, id, "control is limited to the authorized debuggable app")
+                return
+            }
+            when (method) {
                 "heartbeat" -> replyOK(webSocket, id, JSONObject().put("alive", true).put("paused", prefs().getBoolean("paused", false)))
-                "get_screen" -> getScreen(webSocket, id)
+                "auth_pair" -> pairAPI(webSocket, id, params.optString("code", ""))
+                "auth_lockout" -> {
+                    prefs().edit().putString("api_auth_notice", "配对错误过多，请稍后再试").apply()
+                    notifyStateChanged()
+                    replyOK(webSocket, id, JSONObject().put("done", true))
+                }
+                "auth_revoke" -> {
+                    clearAPIGrant()
+                    replyOK(webSocket, id, JSONObject().put("done", true))
+                }
+                "get_screen" -> getScreen(webSocket, id, apiGrantId.ifEmpty { null })
                 "tap_element" -> tapElement(webSocket, id, params)
                 "tap" -> gesture(webSocket, id, params.getInt("x"), params.getInt("y"), null, null, 60L)
                 "swipe" -> gesture(webSocket, id, params.getInt("x1"), params.getInt("y1"),
                     params.getInt("x2"), params.getInt("y2"), params.getLong("durationMs"))
                 "input_text" -> inputText(webSocket, id, params.getString("text"))
-                "press_key" -> pressKey(webSocket, id, params.getString("key"))
+                "press_key" -> pressKey(webSocket, id, params.getString("key"), apiGrantId.isNotEmpty())
                 "get_app_info" -> getAppInfo(webSocket, id, params.getString("packageName"))
                 else -> replyError(webSocket, id, "unknown method")
             }
@@ -261,7 +300,86 @@ class OrbAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun getScreen(webSocket: WebSocket, id: String) {
+    private fun validAPIGrant(grantId: String): Boolean {
+        val settings = prefs()
+        val valid = settings.getBoolean("api_auth_active", false) &&
+            settings.getString("api_grant_id", "") == grantId &&
+            System.currentTimeMillis() < settings.getLong("api_auth_expires_at", 0L) &&
+            System.currentTimeMillis() - settings.getLong("api_last_used_at", 0L) < 5 * 60_000L
+        if (valid) settings.edit().putLong("api_last_used_at", System.currentTimeMillis()).apply()
+        return valid
+    }
+
+    private fun controlPackageAllowed(): Boolean {
+        val settings = prefs()
+        if (settings.getString("api_auth_scope", "") != "controller") return false
+        if (settings.getBoolean("api_control_suspended", false)) return false
+        val allowed = settings.getString("api_auth_package", "") ?: ""
+        return allowed.isNotEmpty() && rootInActiveWindow?.packageName?.toString() == allowed
+    }
+
+    private fun pairAPI(webSocket: WebSocket, id: String, code: String) {
+        val settings = prefs()
+        val started = settings.getLong("pair_started_elapsed", -1L)
+        val elapsed = SystemClock.elapsedRealtime()
+        val expected = settings.getString("pair_code", "") ?: ""
+        if (code.length != 4 || code != expected || started < 0L || elapsed < started || elapsed - started >= 60_000L) {
+            replyError(webSocket, id, "invalid or expired pairing code")
+            return
+        }
+        val scope = settings.getString("pair_scope", "") ?: ""
+        val allowedPackage = settings.getString("pair_package", "") ?: ""
+        if (scope != "viewer" && scope != "controller") {
+            replyError(webSocket, id, "pairing scope unavailable")
+            return
+        }
+        if (scope == "controller") {
+            try {
+                val info = packageManager.getApplicationInfo(allowedPackage, 0)
+                if (info.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE == 0) {
+                    replyError(webSocket, id, "control requires a debuggable app")
+                    return
+                }
+            } catch (_: PackageManager.NameNotFoundException) {
+                replyError(webSocket, id, "debuggable app not found")
+                return
+            }
+        }
+        val bytes = ByteArray(32)
+        SecureRandom().nextBytes(bytes)
+        val grantId = bytes.joinToString("") { "%02x".format(it) }
+        settings.edit().remove("pair_code").remove("pair_scope").remove("pair_package")
+            .putBoolean("api_auth_active", true).putString("api_grant_id", grantId)
+            .putString("api_auth_scope", scope).putString("api_auth_package", allowedPackage)
+            .putBoolean("api_control_suspended", false)
+            .putLong("api_auth_expires_at", System.currentTimeMillis() + 30 * 60_000L)
+            .putLong("api_last_used_at", System.currentTimeMillis())
+            .remove("api_auth_notice").apply()
+        syncOverlay()
+        notifyStateChanged()
+        refreshSessionNotification()
+        replyOK(webSocket, id, JSONObject().put("scope", scope).put("grantId", grantId)
+            .put("allowedPackage", allowedPackage))
+    }
+
+    private fun clearAPIGrant() {
+        prefs().edit().putBoolean("api_auth_active", false).remove("api_grant_id")
+            .putBoolean("api_control_suspended", false)
+            .remove("pair_code").remove("pair_scope").remove("pair_package").apply()
+        syncOverlay()
+        notifyStateChanged()
+        refreshSessionNotification()
+    }
+
+    private fun refreshSessionNotification() {
+        try {
+            startService(Intent(this, SessionService::class.java))
+        } catch (e: RuntimeException) {
+            Log.w("OrbBuddy", "could not refresh session notification: ${e.message}")
+        }
+    }
+
+    private fun getScreen(webSocket: WebSocket, id: String, apiGrantId: String?) {
         val orb = overlay
         orb?.hideForCapture()
         handler.postDelayed({
@@ -274,6 +392,7 @@ class OrbAccessibilityService : AccessibilityService() {
                 fun complete() {
                     orb?.restoreAfterCapture()
                     if (prefs().getBoolean("paused", false)) replyError(webSocket, id, "remote access is paused on the phone")
+                    else if (apiGrantId != null && !validAPIGrant(apiGrantId)) replyError(webSocket, id, "remote API authorization revoked")
                     else replyOK(webSocket, id, result)
                 }
                 takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
@@ -296,6 +415,7 @@ class OrbAccessibilityService : AccessibilityService() {
                             bitmap.compress(Bitmap.CompressFormat.JPEG, 70, bytes)
                             bitmap.recycle()
                             result.put("imageBase64", Base64.getEncoder().encodeToString(bytes.toByteArray()))
+                            result.put("capturedAt", Instant.now().toString())
                         } catch (e: Exception) {
                             result.put("imageError", e.message ?: "screenshot conversion failed")
                         }
@@ -419,7 +539,7 @@ class OrbAccessibilityService : AccessibilityService() {
         } else replyError(webSocket, id, "field rejected text input")
     }
 
-    private fun pressKey(webSocket: WebSocket, id: String, key: String) {
+    private fun pressKey(webSocket: WebSocket, id: String, key: String, apiControl: Boolean) {
         val action = when (key) {
             "back" -> GLOBAL_ACTION_BACK
             "home" -> GLOBAL_ACTION_HOME
@@ -428,7 +548,10 @@ class OrbAccessibilityService : AccessibilityService() {
                 return
             }
         }
-        if (performGlobalAction(action)) replyOK(webSocket, id, JSONObject().put("done", true))
+        if (performGlobalAction(action)) {
+            if (apiControl) prefs().edit().putBoolean("api_control_suspended", true).apply()
+            replyOK(webSocket, id, JSONObject().put("done", true))
+        }
         else replyError(webSocket, id, "global action failed")
     }
 

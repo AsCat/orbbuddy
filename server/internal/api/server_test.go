@@ -47,7 +47,7 @@ func TestMCPToDeviceRoundTrip(t *testing.T) {
 			result := map[string]any{"done": true}
 			if command.Method == "get_screen" {
 				result = map[string]any{"revision": 1, "width": 1080, "height": 2400,
-					"tree": map[string]any{"path": "0", "text": "Hello"},
+					"tree":        map[string]any{"path": "0", "text": "Hello"},
 					"imageBase64": base64.StdEncoding.EncodeToString([]byte("fake-jpeg"))}
 			}
 			_ = conn.WriteJSON(bridge.Response{ID: command.ID, OK: true, Result: mustJSON(result)})
