@@ -64,3 +64,5 @@ swipe 参数是 x1,y1,x2,y2,duration_ms，时长 50–5000 毫秒；back/home �
 线上部署前备份 Go 可执行文件与 Nginx 配置，运行 nginx -t，再重启 Go 和 reload Nginx。当前实例备份在 /opt/orbbuddy/orbbuddy-server.prev 与 /etc/nginx/conf.d/orbbuddy.conf.prev；回滚时恢复两个文件，执行 nginx -t && systemctl reload nginx && systemctl restart orbbuddy.service。
 
 2026-11-10 小米真机 0.3.0 已验收：原 MCP 读屏返回图片；HTTPS 只读口令配对 200、重复口令 401、状态 200、按需 JPEG 200（含采集时间和请求 ID）、元数据 200、只读操作 403、分享链接首次 200/再次 410、手机撤销后原令牌 401/未使用分享链接 410。控制口令绑定圆伴自身的可调试包；点击、滑动和重复 request_id 均返回 executed，Home 后立即点击返回 403，状态的 control_available 为 false，读屏与执行回执仍为 200，服务端撤销成功。随机 4 位码在 62 秒后配对返回 401，测试口令已在手机清除。公网首页与 OpenAPI 均返回 200；当前 ChatGPT 网页抓取工具对该新域名报告无法访问，因此不能把“网页抓取可读”标为通过，仍需后续用实际客户端再测。
+
+2026-11-10 网页抓取排障：公网 HTTPS 首页和 OpenAPI 返回 200，证书验证通过，无重定向。Nginx 日志里，来自 OpenAI 公布的 SearchBot IP 的请求到达了 /robots.txt，旧配置返回 404；已增加显式允许抓取的 robots.txt 和 sitemap.xml，均返回 200。再次使用当前 ChatGPT 网页抓取工具打开首页时仍报“URL not accessible”，服务器没有收到对应的首页请求。此现象与新页面尚未进入搜索索引或工具侧访问策略相符；具体工具侧原因无法从本站日志确认。
