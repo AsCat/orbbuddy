@@ -1,6 +1,6 @@
 # MCP 客户端接入
 
-服务地址为 `https://orb.yuanxuyinli.com/mcp`。客户端需支持 MCP Streamable HTTP，并在每个请求中发送 `Authorization: Bearer <MCP 令牌>`。手机使用的是另一枚设备令牌，不能混用。
+把下面的 `your-domain.example` 换成[自己部署](self-host.md)的域名；维护者的 `orb.yuanxuyinli.com` 是个人实例，不提供公共设备接入。客户端需支持 MCP Streamable HTTP，并在每个请求中发送 `Authorization: Bearer <MCP 令牌>`。手机使用的是另一枚设备令牌，不能混用。
 
 ## Codex CLI / 桌面端
 
@@ -8,7 +8,7 @@
 
 ```toml
 [mcp_servers.orbbuddy]
-url = "https://orb.yuanxuyinli.com/mcp"
+url = "https://your-domain.example/mcp"
 bearer_token_env_var = "ORBBUDDY_MCP_TOKEN"
 default_tools_approval_mode = "writes"
 tool_timeout_sec = 30

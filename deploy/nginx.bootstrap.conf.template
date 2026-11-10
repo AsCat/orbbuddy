@@ -1,0 +1,14 @@
+# HTTP-only configuration for the first ACME webroot validation.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name @@DOMAIN@@;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root @@ACME_ROOT@@;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / { return 404; }
+}

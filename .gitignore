@@ -7,3 +7,7 @@
 *.iml
 server/orbbuddy-server
 .env
+*.jks
+*.keystore
+*.p12
+dist/

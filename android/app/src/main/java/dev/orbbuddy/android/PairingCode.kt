@@ -41,8 +41,14 @@ object PairingCode {
         val prefs = context.getSharedPreferences("connection", Context.MODE_PRIVATE)
         val code = prefs.getString("pair_code", "") ?: ""
         val started = prefs.getLong("pair_started_elapsed", -1L)
-        val age = SystemClock.elapsedRealtime() - started
-        if (code.length != 4 || started < 0L || age !in 0..59_999L) return null
-        return Active(code, prefs.getString("pair_scope", "viewer") ?: "viewer", (60_000L - age + 999L) / 1000L)
+        val remaining = secondsLeft(started, SystemClock.elapsedRealtime()) ?: return null
+        if (code.length != 4) return null
+        return Active(code, prefs.getString("pair_scope", "viewer") ?: "viewer", remaining)
+    }
+
+    internal fun secondsLeft(startedElapsed: Long, nowElapsed: Long): Long? {
+        val age = nowElapsed - startedElapsed
+        if (startedElapsed < 0L || age !in 0..59_999L) return null
+        return (60_000L - age + 999L) / 1000L
     }
 }

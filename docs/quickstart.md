@@ -12,7 +12,7 @@ go test ./...
 go build -o orbbuddy-server ./cmd/orbbuddy-server
 ```
 
-为设备和 MCP 客户端分别生成一枚随机令牌，例如 `openssl rand -hex 32`。设置 `ORBBUDDY_DEVICE_TOKEN`、`ORBBUDDY_MCP_TOKEN` 和 `ORBBUDDY_LISTEN=127.0.0.1:18093`，将 Go 进程作为 systemd 服务运行。用 Nginx 等反向代理提供 HTTPS/WSS；`deploy/` 中的域名和证书路径是本仓库维护者的实例，部署时替换为自己的值。设备入口是 `wss://你的域名/device?id=primary`，MCP 入口是 `https://你的域名/mcp`。Go 监听地址保持为本机地址。
+为设备和 MCP 客户端分别生成一枚随机令牌，例如 `openssl rand -hex 32`。设置 `ORBBUDDY_DEVICE_TOKEN`、`ORBBUDDY_MCP_TOKEN` 和 `ORBBUDDY_LISTEN=127.0.0.1:18093`，将 Go 进程作为 systemd 服务运行。用 Nginx 等反向代理提供 HTTPS/WSS；从[自托管指南](self-host.md)生成自己的域名与证书配置。设备入口是 `wss://你的域名/device?id=primary`，MCP 入口是 `https://你的域名/mcp`。Go 监听地址保持为本机地址。
 
 ## 2. 安装 Android App
 
@@ -35,7 +35,7 @@ cd android
 
 ## 验收清单
 
-标准 HTTPS 接口的手机临时授权与调用方式见 [HTTPS API 说明](https-api.md)，或直接打开 https://orb.yuanxuyinli.com/ 。原 MCP 设备令牌与新 HTTPS 临时会话令牌不能混用。
+标准 HTTPS 接口的手机临时授权与调用方式见 [HTTPS API 说明](https-api.md)，或打开自己部署实例的首页。原 MCP 设备令牌与新 HTTPS 临时会话令牌不能混用。
 
 1. 手机保持移动网络，电脑不连接无线 ADB：连续多次调用 `get_screen`，都应返回图片和节点树。
 2. 锁屏 30 分钟后再次读屏；记录响应耗时、`lastSeenAt` 和前台通知状态。

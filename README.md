@@ -1,20 +1,22 @@
 # 圆伴 OrbBuddy
 
-让 Android 手机在移动网络下主动连回自己的服务器，通过 MCP 向电脑上的智能体提供按需读屏和界面操作。MVP 以开发测试为目标，无需运行时无线 ADB，也无需手机和电脑处在同一局域网。
+让 Android 手机在移动网络下主动连回可从公网访问的中转服务，通过 MCP 向电脑上的智能体提供按需读屏和界面操作。MVP 以开发测试为目标，无需运行时无线 ADB，也无需手机和电脑处在同一局域网。
 
 ## 模块
 
 - `android/`：Android 11+ 客户端。用户手动启用无障碍服务，填写 `wss://` 地址和设备令牌，开启或停止测试会话；可选卡通悬浮球提供手机端暂停入口。
 - `server/`：单个 Go 进程，接收手机 WebSocket 长连接，并提供 Streamable HTTP MCP 接口；不持久化屏幕内容。
-- `deploy/`：systemd 与 Nginx 示例配置。线上入口为 `orb.yuanxuyinli.com`，Go 只监听本机端口。
+- `deploy/`：systemd 与 Nginx 部署模板。维护者实例的入口为 `orb.yuanxuyinli.com`，Go 只监听本机端口。
 
 ## 运行原理
 
 ```text
-Android 无障碍服务 ── WSS/移动网络 ──> 私有服务器 Go relay
+Android 无障碍服务 ── WSS/移动网络 ──> 公网可达的 Go relay
                                                 │
 电脑 Codex / WorkBuddy ── HTTPS MCP ────────────┘
 ```
+
+**使用者必须有自己的公网 IP 吗？**不必。手机和电脑都主动向中转入口发起出站连接；中转入口可部署在已有 VPS、云主机，或由未来的托管服务提供。当前开源版使用全局设备/MCP 令牌，适合一个人自托管，**不支持多个互不信任的用户共用同一实例**。维护者域名是个人实例，不是公共中转服务。详见[部署方式与步骤](docs/self-host.md)。
 
 手机断线后自动退避重连。每次 `get_screen` 读取当前无障碍节点树并尝试截取一张压缩 JPEG；`tap_element` 使用该次读屏返回的 `revision` 与节点 `path`，界面变化后必须重新读屏。截图被 Android 拒绝或安全窗口遮挡时，仍可返回可见的节点树和 `imageError`。
 
@@ -55,13 +57,13 @@ Android：用 Android Studio 打开 `android/`，或设置 `ANDROID_HOME` 后运
 
 ## 部署
 
-Go 服务配置 `ORBBUDDY_LISTEN=127.0.0.1:18093`、`ORBBUDDY_DEVICE_TOKEN` 和 `ORBBUDDY_MCP_TOKEN`；两个令牌分别给手机和 MCP 客户端，保存在服务器 `/etc/orbbuddy/server.env`，不要提交到 Git。Nginx 负责 HTTPS/WSS。示例见 `deploy/`，上线时执行 `nginx -t` 后再 reload。
+Go 服务配置 `ORBBUDDY_LISTEN=127.0.0.1:18093`、`ORBBUDDY_DEVICE_TOKEN` 和 `ORBBUDDY_MCP_TOKEN`；两个令牌分别给手机和 MCP 客户端，保存在服务器 `/etc/orbbuddy/server.env`，不要提交到 Git。Nginx 负责 HTTPS/WSS。通用步骤见[自托管指南](docs/self-host.md)，上线时执行 `nginx -t` 后再 reload。
 
-手机地址：`wss://orb.yuanxuyinli.com/device?id=primary`
+手机地址：`wss://你的域名/device?id=primary`
 
-MCP 地址：`https://orb.yuanxuyinli.com/mcp`
+MCP 地址：`https://你的域名/mcp`
 
-安装与验收见 [docs/quickstart.md](docs/quickstart.md)，客户端配置见 [docs/client-setup.md](docs/client-setup.md)。开源版本路线和 iOS 可行性见 [开源发展计划](docs/open-source-plan.md)，既有功能进度见 [实施路线](docs/roadmap.md)。
+安装与验收见 [docs/quickstart.md](docs/quickstart.md)，客户端配置见 [docs/client-setup.md](docs/client-setup.md)。发布签名与验证见 [Android 发布签名](docs/release-signing.md)。开源版本路线和 iOS 可行性见 [开源发展计划](docs/open-source-plan.md)，既有功能进度见 [实施路线](docs/roadmap.md)。
 
 ## 当前边界与下一步
 
