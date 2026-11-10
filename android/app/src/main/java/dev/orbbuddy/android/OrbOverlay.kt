@@ -4,15 +4,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Point
 import android.graphics.drawable.GradientDrawable
-import android.os.PowerManager
-import android.os.SystemClock
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
@@ -22,27 +20,29 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.abs
-import kotlin.math.sin
 
-/** An optional, locally controlled accessibility overlay. It never grants remote access itself. */
+/** An optional, locally controlled accessibility overlay. Codes still require server pairing. */
 class OrbOverlay(
     private val service: OrbAccessibilityService,
     private val onPauseToggle: () -> Unit,
     private val onAPIRevoke: () -> Unit,
     private val onHide: () -> Unit,
+    private val onPairCodeRequest: (String) -> PairingCode.Result,
 ) {
     private val manager = service.getSystemService(WindowManager::class.java)
-    private val power = service.getSystemService(PowerManager::class.java)
     private val prefs = service.getSharedPreferences("connection", Context.MODE_PRIVATE)
+    private val handler = Handler(Looper.getMainLooper())
     private val density = service.resources.displayMetrics.density
     private val size = dp(72)
     private val edge = dp(12)
     private val touchSlop = ViewConfiguration.get(service).scaledTouchSlop
-    private var orb: FaceView? = null
+    private var orb: OrbFaceView? = null
     private var orbParams: WindowManager.LayoutParams? = null
     private var menu: LinearLayout? = null
     private var menuStatus: TextView? = null
     private var pauseAction: TextView? = null
+    private var codeLine: TextView? = null
+    private var menuNotice = ""
     private var receiverRegistered = false
     private var captureHidden = false
     private var paused = false
@@ -54,6 +54,13 @@ class OrbOverlay(
     private var startY = 0
     private var downAt = 0L
     private var dragging = false
+    private val codeTicker = object : Runnable {
+        override fun run() {
+            if (menu == null) return
+            refreshCodeLine()
+            handler.postDelayed(this, 1000L)
+        }
+    }
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -69,11 +76,13 @@ class OrbOverlay(
         orb?.apply {
             this.paused = paused
             this.connected = status == "已连接"
+            this.character = OrbCharacter.from(prefs.getString("orb_character", null))
             contentDescription = "圆伴悬浮球，${if (paused) "已暂停" else if (apiActive) "HTTPS 远程访问中" else status}。点击打开会话控制，拖动可移动"
             invalidate()
         }
         menuStatus?.text = statusLabel()
         pauseAction?.text = if (paused) "继续远程访问" else "暂停远程访问"
+        refreshCodeLine()
     }
 
     fun hideForCapture() {
@@ -106,7 +115,9 @@ class OrbOverlay(
         val x = prefs.getInt("orb_x", screen.x - size - edge).coerceIn(edge, (screen.x - size - edge).coerceAtLeast(edge))
         val y = prefs.getInt("orb_y", screen.y * 2 / 3).coerceIn(edge, (screen.y - size - edge).coerceAtLeast(edge))
         val params = layoutParams(size, size, x, y)
-        val view = FaceView(service)
+        val view = OrbFaceView(service).apply {
+            character = OrbCharacter.from(prefs.getString("orb_character", null))
+        }
         view.setOnTouchListener { _, event -> onTouch(event) }
         try {
             manager.addView(view, params)
@@ -192,10 +203,13 @@ class OrbOverlay(
         }
         val params = orbParams ?: return
         val screen = displaySize()
-        val width = dp(188)
-        val x = if (params.x < screen.x / 2) params.x else params.x + size - width
-        val menuHeight = if (apiActive) dp(196) else dp(148)
-        val y = if (params.y > menuHeight + dp(10)) params.y - menuHeight else params.y + size + dp(8)
+        val width = dp(236)
+        val x = (if (params.x < screen.x / 2) params.x else params.x + size - width)
+            .coerceIn(0, (screen.x - width).coerceAtLeast(0))
+        val hasRevokeAction = apiActive || PairingCode.active(service) != null
+        val menuHeight = dp(if (hasRevokeAction) 365 else 317)
+        val y = (if (params.y > menuHeight + dp(10)) params.y - menuHeight else params.y + size + dp(8))
+            .coerceIn(0, (screen.y - menuHeight).coerceAtLeast(0))
         val panel = LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(9), dp(14), dp(9))
@@ -207,6 +221,22 @@ class OrbOverlay(
             elevation = dp(8).toFloat()
         }
         menuStatus = menuLine(statusLabel(), false).also(panel::addView)
+        codeLine = TextView(service).apply {
+            textSize = 20f
+            setTextColor(Color.rgb(17, 80, 112))
+            typeface = android.graphics.Typeface.MONOSPACE
+            gravity = Gravity.CENTER_VERTICAL
+            minHeight = dp(45)
+        }.also(panel::addView)
+        refreshCodeLine()
+        menuLine("生成只读授权码", true).also {
+            it.setOnClickListener { generateCode("viewer") }
+            panel.addView(it)
+        }
+        menuLine("生成测试控制码", true).also {
+            it.setOnClickListener { generateCode("controller") }
+            panel.addView(it)
+        }
         pauseAction = menuLine(if (paused) "继续远程访问" else "暂停远程访问", true).also {
             it.setOnClickListener {
                 hideMenu()
@@ -214,7 +244,7 @@ class OrbOverlay(
             }
             panel.addView(it)
         }
-        if (apiActive) menuLine("撤销 HTTPS 授权", true).also {
+        if (hasRevokeAction) menuLine(if (apiActive) "撤销 HTTPS 授权" else "清除当前授权码", true).also {
             it.setOnClickListener {
                 hideMenu()
                 onAPIRevoke()
@@ -231,18 +261,40 @@ class OrbOverlay(
         try {
             manager.addView(panel, layoutParams(width, WindowManager.LayoutParams.WRAP_CONTENT, x, y))
             menu = panel
+            handler.postDelayed(codeTicker, 1000L)
         } catch (e: RuntimeException) {
             menuStatus = null
             pauseAction = null
+            codeLine = null
             Log.w("OrbBuddy", "cannot show orb controls", e)
         }
     }
 
+    private fun generateCode(scope: String) {
+        hideMenu()
+        val result = onPairCodeRequest(scope)
+        menuNotice = if (result.code == null) result.message else ""
+        toggleMenu()
+    }
+
+    private fun refreshCodeLine() {
+        val active = PairingCode.active(service)
+        codeLine?.textSize = if (active == null) 13f else 20f
+        codeLine?.text = when {
+            active != null -> "${if (active.scope == "controller") "控制" else "只读"} ${active.code} · ${active.secondsLeft} 秒"
+            menuNotice.isNotEmpty() -> menuNotice
+            else -> "当前无有效授权码"
+        }
+    }
+
     private fun hideMenu() {
+        handler.removeCallbacks(codeTicker)
         menu?.let { runCatching { manager.removeView(it) } }
         menu = null
         menuStatus = null
         pauseAction = null
+        codeLine = null
+        menuNotice = ""
     }
 
     private fun menuLine(label: String, action: Boolean) = TextView(service).apply {
@@ -271,50 +323,4 @@ class OrbOverlay(
     private fun displaySize() = Point().also { manager.defaultDisplay.getRealSize(it) }
     private fun dp(value: Int) = (value * density).toInt()
 
-    private inner class FaceView(context: Context) : View(context) {
-        var paused = false
-        var connected = false
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val now = SystemClock.uptimeMillis()
-            val breath = if (paused) 1f else (1f + 0.025f * sin(now / 610.0).toFloat())
-            canvas.save()
-            canvas.scale(width / 72f, height / 72f)
-            canvas.scale(breath, breath, 36f, 36f)
-            paint.style = Paint.Style.FILL
-            paint.color = if (paused) Color.rgb(165, 179, 190) else Color.rgb(69, 194, 241)
-            canvas.drawCircle(36f, 36f, 31f, paint)
-            paint.color = if (paused) Color.rgb(197, 207, 215) else Color.rgb(135, 224, 250)
-            canvas.drawCircle(28f, 22f, 12f, paint)
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 3f
-            paint.color = when {
-                paused -> Color.rgb(115, 125, 137)
-                connected -> Color.rgb(49, 173, 107)
-                else -> Color.rgb(242, 170, 65)
-            }
-            canvas.drawCircle(36f, 36f, 33f, paint)
-            paint.style = Paint.Style.FILL
-            paint.color = Color.rgb(27, 72, 105)
-            val blinking = !paused && now % 4400L < 150L
-            if (blinking) {
-                canvas.drawRoundRect(21f, 32f, 29f, 34f, 2f, 2f, paint)
-                canvas.drawRoundRect(43f, 32f, 51f, 34f, 2f, 2f, paint)
-            } else {
-                canvas.drawCircle(25f, 32f, 3.5f, paint)
-                canvas.drawCircle(47f, 32f, 3.5f, paint)
-            }
-            paint.color = Color.rgb(255, 144, 157)
-            canvas.drawCircle(17f, 41f, 4f, paint)
-            canvas.drawCircle(55f, 41f, 4f, paint)
-            paint.color = Color.rgb(27, 72, 105)
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 2.4f
-            canvas.drawArc(29f, 35f, 43f, 49f, 20f, 140f, false, paint)
-            canvas.restore()
-            if (!paused && power.isInteractive && isAttachedToWindow) postInvalidateDelayed(50L)
-        }
-    }
 }

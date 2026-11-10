@@ -7,12 +7,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.provider.Settings
 import android.view.ViewGroup
 import android.widget.Button
@@ -21,7 +22,6 @@ import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.ScrollView
-import java.security.SecureRandom
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -108,6 +108,51 @@ class MainActivity : Activity() {
             }
         }
         add(orbSwitch)
+        add(TextView(this).apply { text = "选择悬浮伙伴（点选后立即生效）" })
+        val characters = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val characterCards = mutableMapOf<OrbCharacter, LinearLayout>()
+        fun markSelected(selected: OrbCharacter) {
+            characterCards.forEach { (character, card) ->
+                val chosen = character == selected
+                card.alpha = if (chosen) 1f else 0.63f
+                card.isSelected = chosen
+                card.background = GradientDrawable().apply {
+                    setColor(if (chosen) Color.rgb(235, 249, 247) else Color.WHITE)
+                    cornerRadius = 16 * resources.displayMetrics.density
+                    setStroke(((if (chosen) 2 else 1) * resources.displayMetrics.density).toInt().coerceAtLeast(1),
+                        if (chosen) Color.rgb(8, 123, 116) else Color.rgb(215, 230, 231))
+                }
+            }
+        }
+        for (character in OrbCharacter.entries) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = android.view.Gravity.CENTER
+                val pad = (8 * resources.displayMetrics.density).toInt()
+                setPadding(pad, pad, pad, pad)
+                isClickable = true
+                contentDescription = "选择${character.label}，${character.description}"
+            }
+            val face = OrbFaceView(this, animated = false).apply { this.character = character }
+            card.addView(face, LinearLayout.LayoutParams((72 * resources.displayMetrics.density).toInt(),
+                (72 * resources.displayMetrics.density).toInt()))
+            card.addView(TextView(this).apply {
+                text = character.label
+                gravity = android.view.Gravity.CENTER
+            })
+            characterCards[character] = card
+            characters.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                val gap = (4 * resources.displayMetrics.density).toInt()
+                setMargins(gap, gap, gap, gap)
+            })
+            card.setOnClickListener {
+                prefs.edit().putString("orb_character", character.name).apply()
+                markSelected(character)
+                sendBroadcast(Intent(OrbAccessibilityService.ACTION_ORB_CHANGED).setPackage(packageName))
+            }
+        }
+        markSelected(OrbCharacter.from(prefs.getString("orb_character", null)))
+        add(characters)
         pauseButton = Button(this).apply {
             setOnClickListener {
                 prefs.edit().putBoolean("paused", !prefs.getBoolean("paused", false)).apply()
@@ -137,16 +182,6 @@ class MainActivity : Activity() {
             text = "生成开发测试控制口令（60 秒）"
             setOnClickListener {
                 val packageName = controlPackage.text.toString().trim()
-                try {
-                    val info = packageManager.getApplicationInfo(packageName, 0)
-                    if (info.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE == 0) {
-                        pairStatus.text = "该 App 不是可调试版本，只能使用只读授权"
-                        return@setOnClickListener
-                    }
-                } catch (_: PackageManager.NameNotFoundException) {
-                    pairStatus.text = "未找到该 App；请填写已安装的可调试 App 包名"
-                    return@setOnClickListener
-                }
                 prefs.edit().putString("control_package", packageName).apply()
                 createPairCode("controller", packageName)
             }
@@ -200,17 +235,13 @@ class MainActivity : Activity() {
     }
 
     private fun createPairCode(scope: String, targetPackage: String) {
-        val prefs = getSharedPreferences("connection", MODE_PRIVATE)
-        if (!prefs.getBoolean("enabled", false) || prefs.getString("status", "") != "已连接") {
-            pairStatus.text = "请先让圆伴连接服务器"
-            return
+        val result = PairingCode.create(this, scope, targetPackage)
+        if (result.code == null) {
+            pairStatus.text = result.message
+        } else {
+            refreshStatus()
+            handler.postDelayed({ refreshStatus() }, 60_100L)
         }
-        val code = SecureRandom().nextInt(10_000).toString().padStart(4, '0')
-        prefs.edit().putString("pair_code", code).putString("pair_scope", scope)
-            .putString("pair_package", targetPackage)
-            .putLong("pair_started_elapsed", SystemClock.elapsedRealtime()).apply()
-        refreshStatus()
-        handler.postDelayed({ refreshStatus() }, 60_100L)
     }
 
     private fun refreshStatus() {
@@ -228,11 +259,9 @@ class MainActivity : Activity() {
             "测试会话已开启。连接状态：${if (paused) "已暂停" else prefs.getString("status", "等待无障碍服务")}。" +
                 if (unrestricted) "后台省电限制已关闭" else "若锁屏后断线，请在后台连接设置中允许持续运行"
         } else "测试会话已停止"
-        val started = prefs.getLong("pair_started_elapsed", -1L)
-        val code = prefs.getString("pair_code", "") ?: ""
-        val age = SystemClock.elapsedRealtime() - started
-        pairStatus.text = if (code.isNotEmpty() && started >= 0L && age in 0..59_999L) {
-            "${if (prefs.getString("pair_scope", "") == "controller") "控制" else "只读"}口令：$code（剩余约 ${(60_000L - age + 999L) / 1000L} 秒）"
+        val activeCode = PairingCode.active(this)
+        pairStatus.text = if (activeCode != null) {
+            "${if (activeCode.scope == "controller") "控制" else "只读"}口令：${activeCode.code}（剩余约 ${activeCode.secondsLeft} 秒）"
         } else "当前没有有效配对口令"
         val active = prefs.getBoolean("api_auth_active", false) &&
             System.currentTimeMillis() < prefs.getLong("api_auth_expires_at", 0L) &&
